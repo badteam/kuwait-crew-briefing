@@ -165,3 +165,4 @@ body[data-page=admin] .intro{display:none}
 
 .depform{display:inline-flex;gap:6px;margin:0}.depform input{width:72px;padding:7px 8px;font-family:var(--num);font-size:16px}.depform button{padding:7px 10px;font-size:13px}.manual{display:inline-block;margin-left:6px;font:700 10px var(--ui);letter-spacing:.1em;text-transform:uppercase;color:var(--gold)}
 body[data-page=admin] .room{font-size:34px;white-space:nowrap}body[data-page=admin] .cardtop{flex-wrap:wrap}
+.nextup b{color:var(--sky);font-family:var(--num);font-size:1.25em;letter-spacing:.04em}

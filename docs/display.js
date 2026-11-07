@@ -21,7 +21,8 @@ function render(){
  const t=Date.now()+offset,flights=state?.flights||[];
  $('board').innerHTML=(screen==='hall'?rooms:[screen]).map(room=>{
   const f=flights.find(f=>f.room===room&&!f.done&&f.start&&new Date(f.end)>t);
-  let content='<div class="idle">'+(state?'Waiting for the next flight':'Waiting for flight schedule')+'</div><p>Wishing you a pleasant flight</p>';
+  const next=flights.filter(x=>!x.done&&!x.start&&x.briefing).sort((x,y)=>x.briefing<y.briefing?-1:1)[0];
+  let content='<div class="idle">'+(state?'Waiting for the next flight':'Waiting for flight schedule')+'</div>'+(next?'<p class="nextup">Next briefing <b dir="ltr">'+fmt(next.briefing)+'</b> · <span dir="ltr">'+esc(next.number.replace(/^KU/,'KU '))+'</span> '+esc(next.destination)+'</p>':'<p>Wishing you a pleasant flight</p>');
   if(f)content='<div class="flight" dir="ltr">'+esc(f.number.replace(/^KU/,'KU '))+'</div><div class="destination">'+esc(f.destination)+'</div><div class="sccm">'+person+'<b>SCCM</b><span>'+esc(f.sccm||'SCCM not assigned')+'</span></div><div class="times"><span>'+fmt(f.start)+' – '+fmt(f.end)+'</span><span class="countdown" data-end="'+esc(f.end)+'"></span></div>';
   return '<article class="card '+(f?'active':state?'free':'waiting')+'"><div class="cardtop"><span class="room" dir="ltr">'+room+'</span><span class="status">'+(f?'Briefing in progress':state?'Available':'Waiting for updates')+'</span></div>'+content+'</article>';
  }).join('');
