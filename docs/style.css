@@ -24,3 +24,10 @@
 html[lang=en] td,html[lang=en] th{text-align:left}html[lang=en] body{font-family:Arial,system-ui,sans-serif}html[lang=en] .card .status{line-height:1.4}html[lang=en] .sccm{line-height:1.5}@media(max-width:650px){html[lang=en] .welcome{text-align:left}}
 
 .airline-logo{width:170px;height:60px;object-fit:contain;flex-shrink:0}.brand{flex-wrap:wrap}@media(max-width:600px){.airline-logo{width:125px;height:46px}}
+
+/* v6: pairing, feed status, flight table */
+.paircode{font:700 clamp(64px,12vw,160px) system-ui;letter-spacing:.08em;color:#a5e5f2;margin:24px 0;text-align:center}.card.pairing{max-width:1100px;margin:0 auto}.card.pairing p{font-size:clamp(16px,2vw,24px);text-align:center}
+.feed{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px 24px;margin-bottom:16px}.feed div{display:grid;gap:4px;font-size:12px;color:var(--muted)}.feed b{font-size:15px;color:#f7fbff}.bad{color:#ffb3b8!important}
+.tablewrap.tall{max-height:560px}#flights td,#displays td{white-space:nowrap;vertical-align:middle}#flights tr.warn td{background:#3a2a1a}.sccmform{display:flex;gap:6px}.sccmform input{min-width:180px;padding:6px 9px}.sccmform button,#displays button,#flights select,#displays select{padding:6px 9px}
+#pair{margin-bottom:16px}#pair label:first-child{flex:0 1 160px;min-width:140px}.linkline a{word-break:break-all}nav .display-link{padding:9px 14px}
+body[data-page=admin] .board{grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}body[data-page=admin] .card{min-height:180px}
