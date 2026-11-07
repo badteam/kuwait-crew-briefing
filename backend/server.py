@@ -11,6 +11,7 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 import aerodatabox
+import flightaware
 
 ROOT = Path(__file__).parent
 DATA = Path(os.environ.get('DATA_DIR', str(ROOT / 'data'))); DATA.mkdir(exist_ok=True)
@@ -23,6 +24,8 @@ DB = DATA / 'briefing.sqlite3'
 SYNC_HOURS = float(os.environ.get('SYNC_INTERVAL_HOURS', '6'))
 MONTHLY_UNITS = int(os.environ.get('MONTHLY_UNIT_BUDGET', '360'))   # plan: 400 units/month
 UNITS_PER_CALL = 2
+FA_MONTHLY_PAGES = int(os.environ.get('FLIGHTAWARE_MONTHLY_PAGES', '500'))   # ~$2.50 at $0.005/page
+PROVIDERS = {'aerodatabox': aerodatabox, 'flightaware': flightaware}
 ADMIN_HOURS = 12
 DISPLAY_DAYS = 365
 
@@ -258,11 +261,15 @@ def flight_id(number, departure_utc):
     return 'ku-' + number + '-' + local_date
 
 
-def store_departures(c, departures):
-    """Upsert feed flights. SCCM, room and session times are never overwritten."""
-    t = stamp(now()); added = updated = 0
+def store_departures(c, departures, window=None):
+    """Upsert feed flights. SCCM, room and session times are never overwritten.
+
+    With a window (start, end) in UTC, feed flights in that window that the source no longer
+    lists (and that have not started or been edited) are closed as 'Not in schedule'.
+    """
+    t = stamp(now()); added = updated = 0; seen = set()
     for f in departures:
-        fid = flight_id(f['number'], f['departure_utc'])
+        fid = flight_id(f['number'], f['departure_utc']); seen.add(fid)
         local = stamp(datetime.fromisoformat(f['departure_utc']).astimezone(TZ))
         row = c.execute('SELECT * FROM flights WHERE id=?', (fid,)).fetchone()
         cancelled = str(f.get('status') or '').lower().startswith('cancel')
@@ -288,39 +295,61 @@ def store_departures(c, departures):
             briefing = briefing_from_departure(departure, aircraft)
             c.execute('UPDATE flights SET destination=?,aircraft=?,source=?,departure=?,briefing=?,needs_type=?,status=?,updated=?,done=? WHERE id=?',
                       (f.get('destination') or row['destination'], aircraft, local, departure, briefing,
-                       int(briefing is None), f.get('status'), t, int(cancelled or row['done']), fid))
+                       int(briefing is None), f.get('status'), t, int(cancelled), fid))
         else:   # session already running or finished: keep its room and times
             c.execute('UPDATE flights SET destination=?,status=?,updated=? WHERE id=?', (f.get('destination') or row['destination'], f.get('status'), t, fid))
         updated += 1
+    if window:
+        lo, hi = (w.astimezone(timezone.utc).isoformat(timespec='seconds') for w in window)
+        for row in c.execute("SELECT id FROM flights WHERE origin='feed' AND done=0 AND start IS NULL AND departure_manual=0 AND departure>=? AND departure<?", (lo, hi)).fetchall():
+            if row['id'] not in seen:
+                c.execute("UPDATE flights SET done=1,status='Not in schedule',updated=? WHERE id=?", (t, row['id']))
     return added, updated
 
 
 def units_key(): return 'units:' + now().strftime('%Y-%m')
+def pages_key(): return 'fa-pages:' + now().strftime('%Y-%m')
+
+
+def provider_name(c=None):
+    if c is None:
+        with db() as c2: return provider_name(c2)
+    name = setting(c, 'provider', os.environ.get('FLIGHT_PROVIDER', 'aerodatabox'))
+    return name if name in PROVIDERS else 'aerodatabox'
 
 
 def run_sync(manual=False):
     """Fetch the next 12 hours of KU departures once; every screen shares the result."""
     with LOCK, db() as c:
-        feed = setting(c, 'feed', {})
-        used = setting(c, units_key(), 0)
-        if used + UNITS_PER_CALL > MONTHLY_UNITS:
-            raise ValueError(f'Monthly AeroDataBox budget reached ({used}/{MONTHLY_UNITS} units). Next refresh happens next month.')
+        name = provider_name(c); feed = setting(c, 'feed', {})
         if manual and feed.get('last_attempt') and now() - datetime.fromisoformat(feed['last_attempt']) < timedelta(minutes=15):
             raise ValueError('Flights were refreshed less than 15 minutes ago. Please wait before refreshing again.')
-        feed['last_attempt'] = stamp(now())
-        put_setting(c, units_key(), used + UNITS_PER_CALL)
+        if name == 'aerodatabox':
+            used = setting(c, units_key(), 0)
+            if used + UNITS_PER_CALL > MONTHLY_UNITS:
+                raise ValueError(f'Monthly AeroDataBox budget reached ({used}/{MONTHLY_UNITS} units).')
+            put_setting(c, units_key(), used + UNITS_PER_CALL)
+        elif setting(c, pages_key(), 0) + flightaware.MAX_PAGES > FA_MONTHLY_PAGES:
+            raise ValueError(f'Monthly FlightAware budget reached ({FA_MONTHLY_PAGES} pages).')
+        feed['last_attempt'] = stamp(now()); feed['provider'] = name
         put_setting(c, 'feed', feed)
+    module = PROVIDERS[name]
+    start = now(); end = start + timedelta(hours=12)
     try:
-        departures = aerodatabox.fetch_departures()
+        if name == 'flightaware':
+            departures, pages = module.fetch_departures(start, end)
+            with LOCK, db() as c: put_setting(c, pages_key(), setting(c, pages_key(), 0) + pages)
+        else:
+            departures = module.fetch_departures()
     except Exception as e:
-        message = aerodatabox.describe_error(e)
+        message = module.describe_error(e)
         with LOCK, db() as c:
             feed = setting(c, 'feed', {}); feed.update(ok=False, error=message); put_setting(c, 'feed', feed)
-        raise ValueError('Flight source unavailable: ' + message)
+        raise ValueError('Flight source unavailable (' + name + '): ' + message)
     with LOCK, db() as c:
-        added, updated = store_departures(c, departures)
+        added, updated = store_departures(c, departures, (start, end))
         feed = setting(c, 'feed', {})
-        feed.update(ok=True, error='', last_success=stamp(now()), count=len(departures), added=added, updated=updated)
+        feed.update(ok=True, error='', last_success=stamp(now()), count=len(departures), added=added, updated=updated, provider=name)
         put_setting(c, 'feed', feed)
     return feed
 
@@ -328,7 +357,7 @@ def run_sync(manual=False):
 def sync_loop():
     while True:
         try:
-            if aerodatabox.has_key():
+            if PROVIDERS[provider_name()].has_key():
                 with db() as c: feed = setting(c, 'feed', {})
                 last = feed.get('last_attempt')
                 if not last or now() - datetime.fromisoformat(last) >= timedelta(hours=SYNC_HOURS):
@@ -367,11 +396,14 @@ def snapshot(auth):
             'SELECT * FROM flights WHERE done=0 OR end>? ORDER BY briefing IS NULL,briefing,departure,number', (recent,))]
         feed = setting(c, 'feed', {})
         state = {'now': stamp(now()), 'rooms': ROOMS, 'timezone': 'Asia/Kuwait',
-                 'feed': {k: feed.get(k) for k in ('last_success', 'last_attempt', 'ok', 'error', 'count')}}
+                 'feed': {k: feed.get(k) for k in ('last_success', 'last_attempt', 'ok', 'error', 'count', 'provider')}}
         if auth['role'] == 'admin':
             state['flights'] = rows
+            name = provider_name(c)
             state['feed'].update(units_used=setting(c, units_key(), 0), units_budget=MONTHLY_UNITS,
-                                 interval_hours=SYNC_HOURS, key_configured=aerodatabox.has_key())
+                                 fa_pages_used=setting(c, pages_key(), 0), fa_pages_budget=FA_MONTHLY_PAGES,
+                                 interval_hours=SYNC_HOURS, provider=name, key_configured=PROVIDERS[name].has_key(),
+                                 providers={k: m.has_key() for k, m in PROVIDERS.items()})
             state['displays'] = [dict(r) for r in c.execute(
                 "SELECT id,screen,orientation,label,created,last_seen FROM tokens WHERE role='display' AND expires>? ORDER BY screen,label", (time.time(),))]
             state['pending_crew'] = c.execute('SELECT count(*) FROM crew_pending').fetchone()[0]
@@ -519,8 +551,15 @@ class Handler(BaseHTTPRequestHandler):
                 value = str(p.get('time', '')).strip()
                 set_departure(c, row, gmt_departure(value, row['departure'][:10]))
             return self.send(200, {'ok': True})
+        if path == '/api/provider':
+            name = clean_choice(p.get('provider'), list(PROVIDERS), 'flight data source')
+            if not PROVIDERS[name].has_key(): raise ValueError('The key for ' + name + ' is not configured on the server.')
+            with db() as c:
+                put_setting(c, 'provider', name)
+                feed = setting(c, 'feed', {}); feed.pop('last_attempt', None); put_setting(c, 'feed', feed)   # refresh on next cycle
+            return self.send(200, {'ok': True, 'provider': name})
         if path == '/api/sync':
-            if not aerodatabox.has_key(): raise ValueError('The flight data key is not configured on the server.')
+            if not PROVIDERS[provider_name()].has_key(): raise ValueError('The flight data key for this source is not configured on the server.')
             return self.send(200, run_sync(manual=True))
         if path == '/api/extend':
             with LOCK, db() as c:

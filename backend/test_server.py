@@ -126,4 +126,28 @@ class Tests(unittest.TestCase):
             self.assertEqual((row['sccm'], row['briefing']), ('Chief B', '2026-11-07T10:25:00+03:00'))
         with self.assertRaises(ValueError): app.gmt_departure('25:99', '2026-11-07')
 
+    def test_flightaware_parse_and_missing_flights_closed(self):
+        import flightaware
+        from datetime import datetime, timezone
+        payload = {'scheduled_departures': [
+            {'ident': 'KAC619', 'ident_iata': 'KU619', 'operator_iata': 'KU', 'flight_number': '619', 'scheduled_out': '2026-11-07T10:00:00Z',
+             'destination': {'city': 'Doha'}, 'aircraft_type': 'A20N', 'cancelled': False, 'status': 'Scheduled'},
+            {'ident': 'KAC101', 'ident_iata': 'KU101', 'operator_iata': 'KU', 'scheduled_out': '2026-11-07T14:00:00Z',
+             'destination': {'city': 'London'}, 'aircraft_type': 'B77W', 'cancelled': True},
+            {'ident': 'QTR1077', 'ident_iata': 'QR1077', 'operator_iata': 'QR', 'scheduled_out': '2026-11-07T10:00:00Z'}]}
+        deps = flightaware.kuwait_departures(payload)
+        self.assertEqual([(d['number'], d['aircraft'], d['status']) for d in deps], [('KU619', 'A20N', 'Scheduled'), ('KU101', 'B77W', 'Cancelled')])
+        self.assertEqual(app.briefing_from_departure(deps[0]['departure_utc'], deps[0]['aircraft']), '2026-11-07T11:25:00+03:00')
+        window = (datetime(2026, 11, 7, 9, tzinfo=timezone.utc), datetime(2026, 11, 7, 21, tzinfo=timezone.utc))
+        with app.db() as c:
+            app.store_departures(c, aerodatabox.kuwait_departures(SAMPLE))       # KU157, KU101, KU999 from the other source
+            c.execute("UPDATE flights SET sccm='Kept' WHERE number='KU157'")
+            app.store_departures(c, deps, window)
+            rows = {r['number']: dict(r) for r in c.execute('SELECT * FROM flights')}
+            self.assertEqual((rows['KU157']['done'], rows['KU157']['status'], rows['KU157']['sccm']), (1, 'Not in schedule', 'Kept'))
+            self.assertEqual(rows['KU101']['done'], 1); self.assertEqual(rows['KU619']['done'], 0)
+            app.store_departures(c, aerodatabox.kuwait_departures(SAMPLE))       # reappears -> reopened, name kept
+            row = c.execute("SELECT * FROM flights WHERE number='KU157'").fetchone()
+            self.assertEqual((row['done'], row['sccm']), (0, 'Kept'))
+
 if __name__ == '__main__': unittest.main()

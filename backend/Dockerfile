@@ -1,6 +1,6 @@
 FROM python:3.12-alpine
 WORKDIR /app
-COPY server.py aerodatabox.py ./
+COPY server.py aerodatabox.py flightaware.py ./
 RUN chmod 644 /app/*.py
 RUN adduser -D -u 10001 crew && mkdir /data && chown crew /data
 USER crew
