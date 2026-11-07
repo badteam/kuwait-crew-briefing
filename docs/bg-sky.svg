@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <radialGradient id="glow" cx="78%" cy="18%" r="60%">
+      <stop offset="0" stop-color="#3fa9f5" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#3fa9f5" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="trail" x1="0" x2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#fff" stop-opacity=".22"/>
+    </linearGradient>
+    <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1.1" fill="#9fd4ff" fill-opacity=".10"/>
+    </pattern>
+    <!-- Original 2D airliner, top view, nose pointing right -->
+    <g id="jet" fill="#ffffff" fill-opacity=".06" stroke="#cfe9ff" stroke-opacity=".38" stroke-width="2.2" stroke-linejoin="round">
+      <path d="M600 324 L428 52 Q418 44 404 48 L382 52 L462 324 Z"/>
+      <path d="M600 376 L428 648 Q418 656 404 652 L382 648 L462 376 Z"/>
+      <path d="M236 326 L158 206 L132 206 L176 326 Z"/>
+      <path d="M236 374 L158 494 L132 494 L176 374 Z"/>
+      <rect x="500" y="196" width="78" height="26" rx="13"/>
+      <rect x="500" y="478" width="78" height="26" rx="13"/>
+      <path d="M884 350 C884 330 856 320 818 320 L196 320 C162 320 132 334 104 350 C132 366 162 380 196 380 L818 380 C856 380 884 370 884 350 Z"/>
+      <path d="M842 338 L862 344 M842 362 L862 356" stroke-opacity=".45"/>
+      <path d="M120 350 L250 350" stroke-opacity=".35"/>
+    </g>
+  </defs>
+  <rect width="1600" height="1000" fill="url(#glow)"/>
+  <rect width="1600" height="1000" fill="url(#dots)"/>
+  <!-- latitude lines of a faint globe -->
+  <g fill="none" stroke="#8ecbff" stroke-opacity=".07" stroke-width="1.5">
+    <ellipse cx="1260" cy="760" rx="520" ry="520"/>
+    <ellipse cx="1260" cy="760" rx="520" ry="200"/>
+    <ellipse cx="1260" cy="760" rx="520" ry="380"/>
+    <ellipse cx="1260" cy="760" rx="200" ry="520"/>
+    <ellipse cx="1260" cy="760" rx="380" ry="520"/>
+    <line x1="740" y1="760" x2="1780" y2="760"/>
+  </g>
+  <!-- flight routes -->
+  <g fill="none" stroke="#9fd4ff" stroke-opacity=".28" stroke-width="2" stroke-dasharray="2 12" stroke-linecap="round">
+    <path d="M60 860 Q520 420 1120 520"/>
+    <path d="M180 140 Q700 40 1500 300"/>
+    <path d="M-40 520 Q640 300 1640 120"/>
+  </g>
+  <g fill="#bfe3ff" fill-opacity=".45">
+    <circle cx="60" cy="860" r="5"/><circle cx="1120" cy="520" r="5"/>
+    <circle cx="180" cy="140" r="4"/><circle cx="1500" cy="300" r="4"/>
+  </g>
+  <!-- contrails + large aircraft -->
+  <g transform="translate(820 330) rotate(-14) scale(.92)">
+    <rect x="-900" y="334" width="1000" height="6" rx="3" fill="url(#trail)"/>
+    <rect x="-900" y="360" width="1000" height="6" rx="3" fill="url(#trail)"/>
+    <use href="#jet" x="0" y="0"/>
+  </g>
+  <!-- small aircraft far away -->
+  <g transform="translate(250 175) rotate(-8) scale(.22)" opacity=".8"><use href="#jet"/></g>
+</svg>
