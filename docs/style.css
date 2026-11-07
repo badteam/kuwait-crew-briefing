@@ -22,3 +22,5 @@
 .display-links{display:flex;gap:12px;flex-wrap:wrap;margin:18px 0}.display-link{display:inline-block;padding:12px 18px;border:1px solid #52718a;border-radius:9px;text-decoration:none}.display-link:first-child{background:#8ce4ed;color:#092238;font-weight:bold}#displayURL{width:100%;font-family:system-ui}body[data-page=display] .intro{margin-bottom:18px}body[data-page=display] #notice:empty{display:none}body[data-page=display] .card.waiting .status{background:#263e53;color:#b7c6d3}body[data-page=display] .times>span:first-child{direction:ltr}body[data-page=admin] .intro .eyebrow{display:none}body[data-page=display].stale .board{opacity:.45}
 
 html[lang=en] td,html[lang=en] th{text-align:left}html[lang=en] body{font-family:Arial,system-ui,sans-serif}html[lang=en] .card .status{line-height:1.4}html[lang=en] .sccm{line-height:1.5}@media(max-width:650px){html[lang=en] .welcome{text-align:left}}
+
+.airline-logo{width:170px;height:60px;object-fit:contain;flex-shrink:0}.brand{flex-wrap:wrap}@media(max-width:600px){.airline-logo{width:125px;height:46px}}
