@@ -19,14 +19,14 @@ def aircraft_offset(s):
  s=str(s).strip().upper().replace(' ','').replace('-','')
  if re.fullmatch(r'(B|BOEING)?777\w*',s) or re.fullmatch(r'(A|AIRBUS)?330\w*',s): return 70
  if s in ('SMALL','صغيرة','صغير') or re.fullmatch(r'(A|AIRBUS)?32[01]\w*',s): return 85
- raise ValueError('نوع طائرة غير معروف: '+s+'؛ استخدم SMALL أو A320 أو A321 أو B777 أو A330')
+ raise ValueError('Unknown aircraft type: '+s+'; use SMALL, A320, A321, B777 or A330.')
 def parse_time(value,date=''):
  s=str(value).strip()
  try:
   if re.fullmatch(r'\d{1,2}:\d{2}(:\d{2})?',s): s=str(date).strip()+'T'+s
   t=datetime.fromisoformat(s.replace('Z','+00:00'))
   return t.replace(tzinfo=TZ) if t.tzinfo is None else t.astimezone(TZ)
- except Exception: raise ValueError('أدخل التاريخ YYYY-MM-DD والوقت HH:MM أو تاريخًا ووقتًا كاملين')
+ except Exception: raise ValueError('Enter a YYYY-MM-DD date and HH:MM time, or a full date and time.')
 def norm(v): return re.sub(r'[\s_\-]+','',str(v).strip().lower())
 ALIASES={
  'number':['flight','flightnumber','رقمالرحلة','رقمالرحله'],
@@ -36,28 +36,28 @@ ALIASES={
  'sccm':['sccm','chief','رئيسالطاقم']}
 def read_rows(data,name):
  if name.lower().endswith('.csv'): return list(csv.reader(io.StringIO(data.decode('utf-8-sig'))))
- if not name.lower().endswith('.xlsx'): raise ValueError('الملفات المدعومة XLSX وCSV')
+ if not name.lower().endswith('.xlsx'): raise ValueError('Supported files: XLSX and CSV.')
  ns={'m':'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
  with zipfile.ZipFile(io.BytesIO(data)) as z:
-  if sum(i.file_size for i in z.infolist())>20_000_000: raise ValueError('الملف كبير جدًا')
+  if sum(i.file_size for i in z.infolist())>20_000_000: raise ValueError('The file is too large.')
   def xml(path):
    raw=z.read(path)
-   if b'<!DOCTYPE' in raw or b'<!ENTITY' in raw: raise ValueError('صيغة XML غير مدعومة')
+   if b'<!DOCTYPE' in raw or b'<!ENTITY' in raw: raise ValueError('Unsupported XML format.')
    return ET.fromstring(raw)
   shared=[]
   if 'xl/sharedStrings.xml' in z.namelist():
    shared=[''.join(n.itertext()) for n in xml('xl/sharedStrings.xml').findall('m:si',ns)]
   sheets=sorted(n for n in z.namelist() if re.fullmatch(r'xl/worksheets/sheet\d+.xml',n))
-  if not sheets: raise ValueError('لا توجد ورقة عمل')
+  if not sheets: raise ValueError('No worksheet found.')
   rows=[]
   for r in xml(sheets[0]).findall('.//m:sheetData/m:row',ns):
    row=[]
    for cell in r.findall('m:c',ns):
     ref=re.match(r'[A-Z]+',cell.get('r','A')).group(); idx=0
     for ch in ref: idx=idx*26+ord(ch)-64
-    if idx>50: raise ValueError('الملف يحتوي أعمدة أكثر من اللازم')
+    if idx>50: raise ValueError('The file has too many columns.')
     while len(row)<idx: row.append('')
-    if cell.find('m:f',ns) is not None: raise ValueError('حوّل معادلات Excel إلى قيم قبل الرفع')
+    if cell.find('m:f',ns) is not None: raise ValueError('Convert Excel formulas to values before uploading.')
     v=cell.findtext('m:v','',ns); typ=cell.get('t')
     row[idx-1]=shared[int(v)] if typ=='s' else ''.join(cell.find('m:is',ns).itertext()) if typ=='inlineStr' else v
    rows.append(row)
@@ -65,23 +65,23 @@ def read_rows(data,name):
 
 def import_preview(payload):
  data=base64.b64decode(payload['data'],validate=True)
- if len(data)>3_000_000: raise ValueError('الحد الأقصى 3 ميغابايت')
+ if len(data)>3_000_000: raise ValueError('Maximum file size is 3 MB.')
  rows=[r for r in read_rows(data,payload['name']) if any(str(v).strip() for v in r)]
- if len(rows)<2 or len(rows)>2001: raise ValueError('الملف يجب أن يحتوي من 1 إلى 2000 صف')
+ if len(rows)<2 or len(rows)>2001: raise ValueError('The file must contain 1 to 2000 data rows.')
  mapping={}
  for i,v in enumerate(rows[0]):
   for key,aliases in ALIASES.items():
    if norm(v) in aliases: mapping[key]=i
  crew=payload.get('kind')=='crew'; required=['number','sccm'] if crew else ['number','destination','aircraft','time']
- if any(k not in mapping for k in required): raise ValueError('الأعمدة المطلوبة: '+', '.join(required))
+ if any(k not in mapping for k in required): raise ValueError('Required columns: '+', '.join(required))
  result=[]; seen=set()
  for n,row in enumerate(rows[1:],2):
   def get(k): return str(row[mapping[k]]).strip() if k in mapping and mapping[k]<len(row) else ''
   number=re.sub(r'\s+','',get('number').upper())
-  if not number or len(number)>20: raise ValueError('رقم رحلة غير صالح في صف '+str(n))
+  if not number or len(number)>20: raise ValueError('Invalid flight number in row '+str(n))
   item={'number':number,'sccm':get('sccm')[:120]}
   if crew:
-   if not item['sccm']: raise ValueError('اسم رئيس الطاقم ناقص في صف '+str(n))
+   if not item['sccm']: raise ValueError('Missing SCCM name in row '+str(n))
    item['date']=get('date')
   else:
    dt=get('date'); tm=get('time')
@@ -91,10 +91,10 @@ def import_preview(payload):
     seconds=round(float(tm)*86400); tm=f'{seconds//3600:02}:{seconds%3600//60:02}:00'
    t=parse_time(tm,dt); offset=aircraft_offset(get('aircraft'))
    key=number+'|'+stamp(t)
-   if key in seen: raise ValueError('رحلة مكررة في صف '+str(n))
+   if key in seen: raise ValueError('Duplicate flight in row '+str(n))
    seen.add(key)
    item.update(id=hashlib.sha256(key.encode()).hexdigest()[:24],destination=get('destination')[:120],aircraft=get('aircraft')[:24],source=stamp(t),briefing=stamp(t+timedelta(minutes=offset)))
-   if not item['destination']: raise ValueError('الوجهة ناقصة في صف '+str(n))
+   if not item['destination']: raise ValueError('Missing destination in row '+str(n))
   result.append(item)
  return result
 
@@ -134,27 +134,27 @@ class Handler(BaseHTTPRequestHandler):
  def do_GET(self):
   if self.path=='/health': return self.send(200,{'status':'ok'})
   if self.path=='/api/state':
-   if not self.role(): return self.send(401,{'error':'سجّل الدخول أولًا'})
+   if not self.role(): return self.send(401,{'error':'Please sign in first.'})
    return self.send(200,snapshot())
   return self.send(404,{'error':'Not found'})
  def do_POST(self):
   try:
    size=int(self.headers.get('Content-Length','0'))
-   if size<1 or size>4_100_000: return self.send(413,{'error':'حجم الطلب غير صالح'})
+   if size<1 or size>4_100_000: return self.send(413,{'error':'Invalid request size.'})
    p=json.loads(self.rfile.read(size))
    if self.path=='/api/login':
     ip=self.client_address[0]; attempts=FAILURES.get(ip,[]); attempts=[t for t in attempts if t>time.time()-300]
-    if len(attempts)>=10: return self.send(429,{'error':'محاولات كثيرة؛ انتظر خمس دقائق'})
+    if len(attempts)>=10: return self.send(429,{'error':'Too many attempts. Please wait five minutes.'})
     supplied=str(p.get('password','')); role=None
     for key,label in [('ADMIN_PASSWORD','admin'),('DISPLAY_PASSWORD','display')]:
      expected=os.environ.get(key,'')
      if expected and hmac.compare_digest(supplied,expected): role=label
-    if not role: FAILURES[ip]=attempts+[time.time()]; return self.send(401,{'error':'رمز الدخول غير صحيح'})
+    if not role: FAILURES[ip]=attempts+[time.time()]; return self.send(401,{'error':'Incorrect access code.'})
     token=secrets.token_urlsafe(32); SESSIONS[token]=(role,time.time()+86400*7); return self.send(200,{'token':token,'role':role})
-   if not self.role(): return self.send(401,{'error':'سجّل الدخول أولًا'})
+   if not self.role(): return self.send(401,{'error':'Please sign in first.'})
    if self.path=='/api/logout':
     SESSIONS.pop(self.headers.get('Authorization','').removeprefix('Bearer '),None); return self.send(200,{'ok':True})
-   if self.role()!='admin': return self.send(403,{'error':'هذه العملية للمسؤول فقط'})
+   if self.role()!='admin': return self.send(403,{'error':'Administrator access required.'})
    if self.path in ('/api/preview','/api/import'):
     rows=import_preview(p)
     if self.path=='/api/preview': return self.send(200,{'rows':rows})
@@ -162,7 +162,7 @@ class Handler(BaseHTTPRequestHandler):
      if p.get('kind')=='crew':
       for r in rows:
        matches=c.execute('SELECT id FROM flights WHERE number=? AND done=0 AND (?="" OR substr(source,1,10)=?)',(r['number'],r['date'],r['date'])).fetchall()
-       if len(matches)!=1: raise ValueError('رقم '+r['number']+' غير موجود أو مكرر؛ أضف التاريخ أو صحّح رقم الرحلة')
+       if len(matches)!=1: raise ValueError('Flight '+r['number']+' غير موجود أو مكرر؛ أضف التاريخ أو صحّح Flight الرحلة')
        c.execute('UPDATE flights SET sccm=? WHERE id=?',(r['sccm'],matches[0]['id']))
      else:
       for r in rows:
@@ -171,10 +171,10 @@ class Handler(BaseHTTPRequestHandler):
    if self.path=='/api/extend':
     with LOCK,db() as c:
      row=c.execute('SELECT * FROM flights WHERE id=?',(p.get('id'),)).fetchone()
-     if not row or row['done'] or not row['end'] or parse_time(row['end'])<=now(): raise ValueError('لا يمكن تمديد جلسة منتهية')
+     if not row or row['done'] or not row['end'] or parse_time(row['end'])<=now(): raise ValueError('A finished session cannot be extended.')
      c.execute('UPDATE flights SET end=? WHERE id=?',(stamp(parse_time(row['end'])+timedelta(minutes=5)),row['id']))
     return self.send(200,{'ok':True})
    return self.send(404,{'error':'Not found'})
   except (ValueError,KeyError,TypeError,zipfile.BadZipFile,ET.ParseError) as e: self.send(400,{'error':str(e)[:250]})
-  except Exception: self.send(500,{'error':'تعذر تنفيذ العملية؛ لم تُحفظ التغييرات'})
+  except Exception: self.send(500,{'error':'Unable to complete the operation. Changes were not saved.'})
 if __name__=='__main__': ThreadingHTTPServer(('0.0.0.0',int(os.environ.get('PORT','8080'))),Handler).serve_forever()
