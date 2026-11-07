@@ -2,10 +2,10 @@
 Independent briefing-room dashboard. This is a custom project, not an official AIMS integration.
 
 ## Display
-Open the GitHub Pages site. Choose main hall, a room, or administration.
+The root index.html is a display-only page: no buttons, selectors, login form, or upload controls. Open admin.html for administration, login, uploads, and screen-link creation. Authenticate on each display device via admin.html, then follow its generated display link in the same tab (session credentials never appear in links).
 Orientation: landscape, portrait, or automatic; saved separately per screen on each device.
 Examples: ?screen=A-1&orientation=portrait and ?screen=hall&orientation=landscape.
-The demo uses fictional data only. Live screens need the authenticated backend.
+Use the explicit demo=1 preview link from administration for fictional data. Unconnected normal display links show a waiting state, never fake live flights. The demo uses fictional data only. Live screens need the authenticated backend.
 
 ## Rules
 Rooms: A-1, B-2, C-3, D-4, E-5, F-6, H-8.

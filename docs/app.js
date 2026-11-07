@@ -6,24 +6,25 @@ const df=s=>new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kuwait',day:'2-digit
 let endpoint=localStorage.getItem('crew-endpoint')||'',token=sessionStorage.getItem('crew-token')||'',role=sessionStorage.getItem('crew-role')||'',state=null,demo=false,payload=null,offset=0,lastFetch=0;
 const query=new URLSearchParams(location.search),screen=query.get('screen')||localStorage.getItem('crew-screen')||'hall';
 rooms.forEach(r=>{const op=document.createElement('option');op.value=r;op.textContent='غرفة '+r;$('view').append(op)});
-$('view').value=['hall','admin',...rooms].includes(screen)?screen:'hall';
+$('view').value=['hall',...rooms].includes(screen)?screen:'hall';
 $('orientation').value=query.get('orientation')||localStorage.getItem('crew-orientation-'+$('view').value)||'auto';
 if(!['auto','portrait','landscape'].includes($('orientation').value))$('orientation').value='auto';
 $('endpoint').value=endpoint;
 const person='<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7" r="4"/><path d="M4 22v-3a8 8 0 0 1 16 0v3M9 14l3 6 3-6"/></svg>';
 function notice(text,error=false){$('notice').textContent=text;$('notice').className=error?'error':''}
 async function api(path,body){const res=await fetch(endpoint+path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(12000)});let data;try{data=await res.json()}catch{throw Error('رابط الخدمة لا يعيد استجابة صحيحة')}if(!res.ok){if(res.status===401){token='';sessionStorage.removeItem('crew-token');$('setup').hidden=false}throw Error(data.error||'تعذر الاتصال')}return data}
+function updateDisplayLinks(){const u=new URL('./',location.href);u.searchParams.set('screen',$('view').value);u.searchParams.set('orientation',$('orientation').value);$('openDisplay').href=u.href;$('displayURL').value=u.href;u.searchParams.set('demo','1');$('openDemoDisplay').href=u.href;}
 function orientation(){document.body.dataset.orientation=$('orientation').value;localStorage.setItem('crew-orientation-'+$('view').value,$('orientation').value)}
 function render(){
  orientation();const view=$('view').value,isRoom=rooms.includes(view);
- document.body.classList.toggle('roomview',isRoom);$('admin').hidden=view!=='admin'||role!=='admin'||demo;$('upcoming').hidden=isRoom;$('logout').hidden=!token;
- $('title').textContent=isRoom?'غرفة الإحاطة '+view:view==='admin'?'لوحة إدارة الإحاطة':'رحلتكم تبدأ من هنا';
+ document.body.classList.toggle('roomview',isRoom);$('admin').hidden=role!=='admin'||demo;$('upcoming').hidden=isRoom;$('logout').hidden=!token;
+ $('title').textContent='لوحة إدارة الإحاطة'; updateDisplayLinks();
  if(!state){$('board').innerHTML='';return}
  const flights=state.flights,t=Date.now()+offset;
  $('board').innerHTML=(isRoom?[view]:rooms).map(room=>{
   const f=flights.find(f=>f.room===room&&!f.done&&f.start&&new Date(f.end)>t);
   let content='<div class="idle">بانتظار الرحلة القادمة</div><p>نتمنى لكم رحلة سعيدة</p>';
-  if(f)content='<div class="flight" dir="ltr">'+esc(f.number)+'</div><div class="destination">'+esc(f.destination)+'</div><div class="sccm">'+person+'<b>SCCM</b><span>'+esc(f.sccm||'لم يُحدّد رئيس الطاقم')+'</span></div><div class="times"><span>'+fmt(f.start)+' – '+fmt(f.end)+'</span><span class="countdown" data-end="'+esc(f.end)+'"></span></div>'+(view==='admin'&&role==='admin'&&!demo?'<button class="extend" data-id="'+esc(f.id)+'">تمديد 5 دقائق</button>':'');
+  if(f)content='<div class="flight" dir="ltr">'+esc(f.number)+'</div><div class="destination">'+esc(f.destination)+'</div><div class="sccm">'+person+'<b>SCCM</b><span>'+esc(f.sccm||'لم يُحدّد رئيس الطاقم')+'</span></div><div class="times"><span>'+fmt(f.start)+' – '+fmt(f.end)+'</span><span class="countdown" data-end="'+esc(f.end)+'"></span></div>'+(role==='admin'&&!demo?'<button class="extend" data-id="'+esc(f.id)+'">تمديد 5 دقائق</button>':'');
   return '<article class="card '+(f?'active':'free')+'"><div class="cardtop"><span class="room" dir="ltr">'+room+'</span><span class="status">'+(f?'الإحاطة جارية':'متاحة')+'</span></div>'+content+'</article>';
  }).join('');
  const upcoming=flights.filter(f=>!f.done&&!f.start).slice(0,14);
