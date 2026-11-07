@@ -36,12 +36,14 @@ def migrate():
         c.execute('CREATE TABLE IF NOT EXISTS flights(id TEXT PRIMARY KEY,number TEXT,destination TEXT,aircraft TEXT,source TEXT,briefing TEXT,sccm TEXT,room TEXT,start TEXT,end TEXT,done INTEGER DEFAULT 0)')
         cols = {r['name'] for r in c.execute('PRAGMA table_info(flights)')}
         for name, ddl in [('departure', 'TEXT'), ('origin', "TEXT DEFAULT 'import'"), ('needs_type', 'INTEGER DEFAULT 0'),
-                          ('aircraft_manual', 'INTEGER DEFAULT 0'), ('status', 'TEXT'), ('updated', 'TEXT')]:
+                          ('aircraft_manual', 'INTEGER DEFAULT 0'), ('status', 'TEXT'), ('updated', 'TEXT'),
+                          ('departure_manual', 'INTEGER DEFAULT 0')]:
             if name not in cols: c.execute(f'ALTER TABLE flights ADD COLUMN {name} {ddl}')
         c.execute('CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT)')
         c.execute('CREATE TABLE IF NOT EXISTS tokens(id TEXT PRIMARY KEY,hash TEXT UNIQUE,role TEXT,screen TEXT,orientation TEXT,label TEXT,created TEXT,expires REAL,last_seen REAL)')
         c.execute('CREATE TABLE IF NOT EXISTS pairings(code TEXT PRIMARY KEY,secret TEXT UNIQUE,screen TEXT,orientation TEXT,created REAL,token TEXT)')
         c.execute('CREATE TABLE IF NOT EXISTS crew_pending(number TEXT,date TEXT,sccm TEXT,PRIMARY KEY(number,date))')
+        if 'std' not in {r['name'] for r in c.execute('PRAGMA table_info(crew_pending)')}: c.execute('ALTER TABLE crew_pending ADD COLUMN std TEXT')
 migrate()
 
 
@@ -96,6 +98,32 @@ def parse_time(value, date=''):
     except Exception: raise ValueError('Enter a YYYY-MM-DD date and HH:MM time, or a full date and time.')
 
 
+def gmt_departure(value, date):
+    """'10:00' (+ YYYY-MM-DD date) or a full date-time, read as GMT -> ISO UTC string."""
+    s = str(value).strip()
+    if re.fullmatch(r'0?\.\d+|0', s):   # Excel time cell
+        seconds = round(float(s) * 86400); s = f'{seconds // 3600:02}:{seconds % 3600 // 60:02}'
+    m = re.fullmatch(r'(\d{1,2}):?(\d{2})(?::\d{2})?Z?', s)
+    try:
+        if m:
+            if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', str(date)): raise ValueError
+            t = datetime.fromisoformat(f'{date}T{int(m[1]):02}:{m[2]}:00+00:00')
+        else:
+            t = datetime.fromisoformat(s.replace('Z', '+00:00').replace(' ', 'T'))
+            t = t.replace(tzinfo=timezone.utc) if t.tzinfo is None else t
+    except ValueError:
+        raise ValueError('Enter the departure as HH:MM GMT (with a date), e.g. 10:00.')
+    return t.astimezone(timezone.utc).isoformat(timespec='seconds')
+
+
+def set_departure(c, row, departure_utc):
+    if row['start']: raise ValueError('This briefing has already started.')
+    local = stamp(datetime.fromisoformat(departure_utc).astimezone(TZ))
+    briefing = briefing_from_departure(departure_utc, row['aircraft'])
+    c.execute('UPDATE flights SET departure=?,source=?,briefing=?,needs_type=?,departure_manual=1,done=0 WHERE id=?',
+              (departure_utc, local, briefing, int(briefing is None), row['id']))
+
+
 def norm(v): return re.sub(r'[\s_\-]+', '', str(v).strip().lower())
 
 
@@ -104,7 +132,8 @@ ALIASES = {
     'destination': ['destination', 'flightname', 'الوجهة', 'الوجهه', 'اسمالرحلة', 'اسمالرحله'],
     'aircraft': ['aircraft', 'aircrafttype', 'الطائرة', 'الطائره', 'نوعالطائرة'],
     'date': ['date', 'التاريخ'], 'time': ['time', 'filetime', 'الوقت', 'وقتالملف'],
-    'sccm': ['sccm', 'chief', 'name', 'رئيسالطاقم']}
+    'sccm': ['sccm', 'chief', 'name', 'رئيسالطاقم'],
+    'std': ['std', 'stdgmt', 'stdutc', 'departuregmt', 'departureutc', 'وقتالاقلاع', 'وقتالإقلاع']}
 
 
 def read_rows(data, name):
@@ -170,6 +199,11 @@ def import_preview(payload):
             if not item['sccm']: raise ValueError('Missing SCCM name in row ' + str(n))
             item['date'] = excel_date(get('date'))
             if item['date'] and not re.fullmatch(r'\d{4}-\d{2}-\d{2}', item['date']): raise ValueError('Use YYYY-MM-DD dates (row ' + str(n) + ').')
+            item['std'] = ''
+            if get('std'):
+                if not item['date']: raise ValueError('Add the date when an STD is given (row ' + str(n) + ').')
+                try: item['std'] = gmt_departure(get('std'), item['date'])
+                except ValueError: raise ValueError('Invalid STD in row ' + str(n) + '; use HH:MM GMT.')
         else:
             dt = excel_date(get('date')); tm = get('time')
             if re.fullmatch(r'0?\.\d+|0', tm):
@@ -198,11 +232,14 @@ def import_rows(c, kind, rows):
             found = match_flight(c, r['number'], r['date'])
             if len(found) == 1:
                 c.execute('UPDATE flights SET sccm=? WHERE id=?', (r['sccm'], found[0]['id'])); matched += 1
+                if r.get('std'):
+                    row = c.execute('SELECT * FROM flights WHERE id=?', (found[0]['id'],)).fetchone()
+                    if not row['start']: set_departure(c, row, r['std'])
             elif len(found) > 1:
                 problems.append(r['number'] + ' occurs on several dates; add the date')
             elif r['date']:
-                c.execute('INSERT INTO crew_pending(number,date,sccm) VALUES(?,?,?) ON CONFLICT(number,date) DO UPDATE SET sccm=excluded.sccm',
-                          (r['number'], r['date'], r['sccm'])); pending += 1
+                c.execute('INSERT INTO crew_pending(number,date,sccm,std) VALUES(?,?,?,?) ON CONFLICT(number,date) DO UPDATE SET sccm=excluded.sccm,std=excluded.std',
+                          (r['number'], r['date'], r['sccm'], r.get('std') or None)); pending += 1
             else:
                 problems.append(r['number'] + ' not found yet; add the date so it is applied when the flight arrives')
         if problems: raise ValueError('; '.join(problems[:5]))
@@ -240,14 +277,17 @@ def store_departures(c, departures):
             pending = c.execute('SELECT * FROM crew_pending WHERE number=? AND date IN (?,?)', (f['number'], local_date, utc_date)).fetchone()
             if pending:
                 c.execute('UPDATE flights SET sccm=? WHERE id=?', (pending['sccm'], fid))
+                if pending['std']: set_departure(c, c.execute('SELECT * FROM flights WHERE id=?', (fid,)).fetchone(), pending['std'])
                 c.execute('DELETE FROM crew_pending WHERE number=? AND date=?', (pending['number'], pending['date']))
             added += 1
             continue
         aircraft = row['aircraft'] if row['aircraft_manual'] else (f.get('aircraft') or row['aircraft'] or '')
         if row['start'] is None:
-            briefing = briefing_from_departure(f['departure_utc'], aircraft)
+            departure = row['departure'] if row['departure_manual'] else f['departure_utc']
+            local = stamp(datetime.fromisoformat(departure).astimezone(TZ))
+            briefing = briefing_from_departure(departure, aircraft)
             c.execute('UPDATE flights SET destination=?,aircraft=?,source=?,departure=?,briefing=?,needs_type=?,status=?,updated=?,done=? WHERE id=?',
-                      (f.get('destination') or row['destination'], aircraft, local, f['departure_utc'], briefing,
+                      (f.get('destination') or row['destination'], aircraft, local, departure, briefing,
                        int(briefing is None), f.get('status'), t, int(cancelled or row['done']), fid))
         else:   # session already running or finished: keep its room and times
             c.execute('UPDATE flights SET destination=?,status=?,updated=? WHERE id=?', (f.get('destination') or row['destination'], f.get('status'), t, fid))
@@ -471,6 +511,13 @@ class Handler(BaseHTTPRequestHandler):
                 if row['start']: raise ValueError('This briefing has already started.')
                 c.execute('UPDATE flights SET aircraft=?,aircraft_manual=1,needs_type=0,briefing=? WHERE id=?',
                           (aircraft, briefing_from_departure(row['departure'], aircraft), row['id']))
+            return self.send(200, {'ok': True})
+        if path == '/api/departure':
+            with LOCK, db() as c:
+                row = c.execute('SELECT * FROM flights WHERE id=?', (str(p.get('id')),)).fetchone()
+                if not row or not row['departure']: raise ValueError('Flight not found.')
+                value = str(p.get('time', '')).strip()
+                set_departure(c, row, gmt_departure(value, row['departure'][:10]))
             return self.send(200, {'ok': True})
         if path == '/api/sync':
             if not aerodatabox.has_key(): raise ValueError('The flight data key is not configured on the server.')

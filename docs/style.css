@@ -162,3 +162,6 @@ body[data-page=admin] .intro{display:none}
 }
 @media(orientation:landscape){body.roomview .intro{display:none}body.roomview main{padding-top:3vh}body.roomview .card{min-height:72vh}body.roomview .room{font-size:clamp(56px,7vw,112px)}body.roomview .destination{font-size:clamp(44px,6vw,96px)}}
 @media(orientation:portrait){body::before{background-position:86% 62%}}
+
+.depform{display:inline-flex;gap:6px;margin:0}.depform input{width:72px;padding:7px 8px;font-family:var(--num);font-size:16px}.depform button{padding:7px 10px;font-size:13px}.manual{display:inline-block;margin-left:6px;font:700 10px var(--ui);letter-spacing:.1em;text-transform:uppercase;color:var(--gold)}
+body[data-page=admin] .room{font-size:34px;white-space:nowrap}body[data-page=admin] .cardtop{flex-wrap:wrap}

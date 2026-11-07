@@ -102,4 +102,28 @@ class Tests(unittest.TestCase):
         with app.db() as c:
             feed = app.setting(c, 'feed'); self.assertFalse(feed['ok']); self.assertEqual(app.setting(c, app.units_key()), 2)
 
+    def test_manual_departure_survives_feed(self):
+        deps = aerodatabox.kuwait_departures(SAMPLE)
+        with app.db() as c:
+            app.store_departures(c, deps)
+            row = c.execute("SELECT * FROM flights WHERE number='KU157'").fetchone()
+            app.set_departure(c, row, app.gmt_departure('10:00', row['departure'][:10]))
+            row = c.execute("SELECT * FROM flights WHERE number='KU157'").fetchone()
+            self.assertEqual(row['departure'], '2026-11-07T10:00:00+00:00'); self.assertEqual(row['briefing'], '2026-11-07T11:25:00+03:00')
+            app.store_departures(c, deps)
+            row = c.execute("SELECT * FROM flights WHERE number='KU157'").fetchone()
+            self.assertEqual(row['briefing'], '2026-11-07T11:25:00+03:00'); self.assertEqual(row['departure_manual'], 1)
+
+    def test_crew_upload_with_std(self):
+        data = 'flight,date,std,sccm\nKU 157,2026-11-07,10:00,Chief A\nKU101,2026-11-07,09:15,Chief B\n'
+        rows = app.import_preview({'name': 'c.csv', 'data': csv64(data), 'kind': 'crew'})
+        with app.db() as c:
+            app.store_departures(c, aerodatabox.kuwait_departures(SAMPLE)[:1])
+            r = app.import_rows(c, 'crew', rows); self.assertEqual((r['matched'], r['pending']), (1, 1))
+            self.assertEqual(c.execute("SELECT briefing FROM flights WHERE number='KU157'").fetchone()[0], '2026-11-07T11:25:00+03:00')
+            app.store_departures(c, aerodatabox.kuwait_departures(SAMPLE))
+            row = c.execute("SELECT * FROM flights WHERE number='KU101'").fetchone()
+            self.assertEqual((row['sccm'], row['briefing']), ('Chief B', '2026-11-07T10:25:00+03:00'))
+        with self.assertRaises(ValueError): app.gmt_departure('25:99', '2026-11-07')
+
 if __name__ == '__main__': unittest.main()
