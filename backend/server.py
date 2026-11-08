@@ -40,7 +40,7 @@ def migrate():
         cols = {r['name'] for r in c.execute('PRAGMA table_info(flights)')}
         for name, ddl in [('departure', 'TEXT'), ('origin', "TEXT DEFAULT 'import'"), ('needs_type', 'INTEGER DEFAULT 0'),
                           ('aircraft_manual', 'INTEGER DEFAULT 0'), ('status', 'TEXT'), ('updated', 'TEXT'),
-                          ('departure_manual', 'INTEGER DEFAULT 0'), ('briefing_manual', 'INTEGER DEFAULT 0'), ('crew', 'TEXT')]:
+                          ('departure_manual', 'INTEGER DEFAULT 0'), ('briefing_manual', 'INTEGER DEFAULT 0'), ('crew', 'TEXT'), ('label', 'TEXT')]:
             if name not in cols: c.execute(f'ALTER TABLE flights ADD COLUMN {name} {ddl}')
         c.execute('CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT)')
         c.execute('CREATE TABLE IF NOT EXISTS tokens(id TEXT PRIMARY KEY,hash TEXT UNIQUE,role TEXT,screen TEXT,orientation TEXT,label TEXT,created TEXT,expires REAL,last_seen REAL)')
@@ -130,8 +130,8 @@ def set_departure(c, row, departure_utc):
 def norm(v): return re.sub(r'[\s_\-]+', '', str(v).strip().lower())
 
 
-ROLE_WORDS = {'SCCM': 'SCCM', 'CCI': 'CCI', 'FSS': 'FSS', 'SUPERVISOR': 'FSS', 'CHIEF': 'SCCM', 'PURSER': 'SCCM'}
-ROLE_RE = re.compile(r'\b(SCCM|CCI|FSS|SUPERVISOR)\b', re.I)
+ROLE_WORDS = {'SCCM': 'SCCM', 'CCI': 'CCI', 'FSS': 'FSS', 'INS': 'INS', 'SUPERVISOR': 'FSS', 'INSTRUCTOR': 'INS', 'CHIEF': 'SCCM', 'PURSER': 'SCCM'}
+ROLE_RE = re.compile(r'\b(SCCM|CCI|FSS|SUPERVISOR|INSTRUCTOR)\b', re.I)
 
 
 def parse_crew(text, role='SCCM'):
@@ -195,13 +195,15 @@ def parse_reporting(value, date):
 
 
 ALIASES = {
-    'number': ['flight', 'flightnumber', 'flightno', 'رقمالرحلة', 'رقمالرحله'],
+    'number': ['flight', 'flightnumber', 'flightno', 'flt', 'fltno', 'رقمالرحلة', 'رقمالرحله'],
     'destination': ['destination', 'flightname', 'الوجهة', 'الوجهه', 'اسمالرحلة', 'اسمالرحله'],
     'aircraft': ['aircraft', 'aircrafttype', 'الطائرة', 'الطائره', 'نوعالطائرة'],
     'date': ['date', 'التاريخ'], 'time': ['time', 'filetime', 'الوقت', 'وقتالملف'],
     'sccm': ['sccm', 'chief', 'name', 'رئيسالطاقم'],
     'std': ['std', 'stdgmt', 'stdutc', 'departuregmt', 'departureutc', 'وقتالاقلاع', 'وقتالإقلاع'],
-    'reporting': ['reporting', 'reportingtime', 'report', 'reporttime', 'rpt', 'briefing', 'briefingtime', 'وقتالريبورتينج', 'الريبورتينج', 'وقتالحضور']}
+    'reporting': ['reporting', 'reportingtime', 'report', 'reporttime', 'rpt', 'rept', 'reptkuwait', 'reportingkuwait', 'briefing', 'briefingtime', 'وقتالريبورتينج', 'الريبورتينج', 'وقتالحضور'],
+    'rank': ['rank', 'role', 'position', 'title', 'الرتبة', 'المسمى'],
+    'reg': ['reg', 'registration', 'tail', 'التسجيل']}
 
 
 def read_rows(data, name):
@@ -252,11 +254,21 @@ def import_preview(payload):
     if len(data) > 3_000_000: raise ValueError('Maximum file size is 3 MB.')
     rows = [r for r in read_rows(data, payload['name']) if any(str(v).strip() for v in r)]
     if len(rows) < 2 or len(rows) > 2001: raise ValueError('The file must contain 1 to 2000 data rows.')
-    mapping = {}
-    for i, v in enumerate(rows[0]):
-        for key, aliases in ALIASES.items():
-            if norm(v) in aliases and key not in mapping: mapping[key] = i
-    if payload.get('kind') == 'roster': return roster_preview(rows, mapping)
+    def header_map(row):
+        found = {}
+        for i, v in enumerate(row):
+            h = re.sub(r'\(.*?\)', '', str(v))   # 'REPT (Kuwait)' -> 'REPT'
+            for key, aliases in ALIASES.items():
+                if (norm(v) in aliases or norm(h) in aliases) and key not in found: found[key] = i
+        return found
+    head = 0
+    for i, row in enumerate(rows[:10]):       # title rows may sit above the column headers
+        m = header_map(row)
+        if 'number' in m and ('reporting' in m or 'sccm' in m or 'time' in m): head = i; break
+    titles = ' '.join(str(v) for row in rows[:head] for v in row)
+    rows = rows[head:]
+    mapping = header_map(rows[0])
+    if payload.get('kind') == 'roster': return roster_preview(rows, mapping, titles + ' ' + str(payload.get('name', '')))
     crew = payload.get('kind') == 'crew'
     required = ['number', 'sccm'] if crew else ['number', 'destination', 'aircraft', 'time']
     if any(k not in mapping for k in required): raise ValueError('Required columns: ' + ', '.join(required))
@@ -291,32 +303,68 @@ def import_preview(payload):
     return result
 
 
-def roster_preview(rows, mapping):
-    if 'number' not in mapping or 'reporting' not in mapping: raise ValueError('Required columns: flight, reporting')
+MONTHS = {m: i for i, m in enumerate(['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'], 1)}
+
+
+def date_from_text(text):
+    """'Crew Reporting — 09 Nov 2026' or 'Crew_09Nov2026.xlsx' -> '2026-11-09'."""
+    m = re.search(r'(\d{1,2})[\s\-_]*([A-Za-z]{3})[a-z]*[\s\-_]*(\d{4})', str(text))
+    if m and m[2].lower() in MONTHS: return f'{m[3]}-{MONTHS[m[2].lower()]:02}-{int(m[1]):02}'
+    m = re.search(r'(\d{4})-(\d{2})-(\d{2})', str(text))
+    return m[0] if m else ''
+
+
+def clean_name(name):
+    return re.sub(r'\s+', ' ', re.sub(r'^[\s.,\-]+', '', str(name))).strip()[:80]
+
+
+def roster_preview(rows, mapping, titles=''):
+    if 'number' not in mapping or 'reporting' not in mapping: raise ValueError('Required columns: flight (FLT), reporting time (REPT)')
+    used = {mapping.get(k) for k in ('number', 'reporting', 'date', 'destination', 'rank', 'reg')}
     name_cols = []
     for i, header in enumerate(rows[0]):
         h = norm(header)
-        if i in (mapping.get('number'), mapping.get('reporting'), mapping.get('date'), mapping.get('destination')): continue
+        if i in used or 'id' in h or 'staff' in h or 'reg' == h: continue
         if 'fss' in h or 'supervisor' in h or 'سوبر' in h: name_cols.append((i, 'FSS'))
         elif 'cci' in h: name_cols.append((i, 'CCI'))
         elif any(k in h for k in ('sccm', 'chief', 'cabin', 'crew', 'name', 'رئيس', 'شيف', 'اسم')): name_cols.append((i, 'SCCM'))
-    result = []; seen = set()
+    default_date = date_from_text(titles)
+    groups = {}; order = []; latest = None
     for n, row in enumerate(rows[1:], 2):
         def cell(i): return str(row[i]).strip() if i is not None and i < len(row) else ''
-        number = re.sub(r'\s+', '', cell(mapping['number']).upper())
+        raw = cell(mapping['number'])
+        if not raw: continue
+        number = re.sub(r'\s+', '', raw.upper())
         if re.fullmatch(r'\d{1,4}', number): number = 'KU' + number
         if not re.fullmatch(r'[A-Z0-9]{2,3}\d{1,4}[A-Z]?', number): raise ValueError('Invalid flight number in row ' + str(n))
         date = excel_date(cell(mapping.get('date')))
         if date and not re.fullmatch(r'\d{4}-\d{2}-\d{2}', date): raise ValueError('Use YYYY-MM-DD dates (row ' + str(n) + ').')
-        try: reporting, dated = parse_reporting(cell(mapping['reporting']), date)
+        try: reporting, dated = parse_reporting(cell(mapping['reporting']), date or default_date)
         except ValueError: raise ValueError('Invalid reporting time in row ' + str(n) + '; use HH:MM.')
+        if not date and default_date:   # a list sorted by time: times after midnight belong to the next day
+            t = datetime.fromisoformat(reporting)
+            if latest and t < latest - timedelta(hours=6): t += timedelta(days=1); reporting = stamp(t)
+            latest = max(latest or t, t)
+        rank = cell(mapping.get('rank')).upper()
+        role = ROLE_WORDS.get(rank, rank[:6]) if rank else None
         people = []
-        for i, role in name_cols: people += parse_crew(cell(i), role)
-        key = number + '|' + reporting
-        if key in seen: raise ValueError('Duplicate flight in row ' + str(n))
-        seen.add(key)
-        result.append({'number': number, 'date': reporting[:10], 'reporting': reporting, 'dated': dated,
-                       'destination': cell(mapping.get('destination'))[:120], 'crew': people[:6], 'crew_text': crew_text(people[:6])})
+        for i, col_role in name_cols:
+            people += [dict(p, name=clean_name(p['name'])) for p in parse_crew(cell(i), role or col_role)]
+        reg = re.sub(r'\s+', '', cell(mapping.get('reg')).upper())
+        key = (reg or number, reporting)   # same aircraft and time = one crew briefing (e.g. KU619 / KU620)
+        if key not in groups:
+            groups[key] = {'number': number, 'numbers': [], 'date': reporting[:10], 'reporting': reporting, 'dated': dated or bool(default_date),
+                           'destination': cell(mapping.get('destination'))[:120], 'crew': []}
+            order.append(key)
+        if number not in groups[key]['numbers']: groups[key]['numbers'].append(number)
+        for p in people:
+            if p['name'] and p not in groups[key]['crew']: groups[key]['crew'].append(p)
+    if not order: raise ValueError('No flights found in the file.')
+    result = []
+    for key in order:
+        g = groups[key]; g['crew'] = g['crew'][:6]; g['crew_text'] = crew_text(g['crew'])
+        g['label'] = g['numbers'][0] + ''.join(' / ' + re.sub(r'^KU', '', n) for n in g['numbers'][1:])
+        result.append(g)
     return result
 
 
@@ -327,20 +375,27 @@ def import_roster(c, rows, full_list):
         rep_ = datetime.fromisoformat(r['reporting'])
         lo, hi = stamp(rep_ - timedelta(hours=6)), stamp(rep_ + timedelta(hours=6))
         utc_lo = rep_.astimezone(timezone.utc).isoformat(timespec='seconds'); utc_hi = (rep_ + timedelta(hours=6)).astimezone(timezone.utc).isoformat(timespec='seconds')
-        row = c.execute("SELECT * FROM flights WHERE number=? AND ((briefing>=? AND briefing<=?) OR (briefing IS NULL AND departure>=? AND departure<=?)) "
-                        "ORDER BY start IS NOT NULL, done", (r['number'], lo, hi, utc_lo, utc_hi)).fetchone()
+        candidates = c.execute("SELECT * FROM flights WHERE number=? AND ((briefing>=? AND briefing<=?) OR (briefing IS NULL AND departure>=? AND departure<=?)) "
+                               "ORDER BY start IS NOT NULL, done", (r['number'], lo, hi, utc_lo, utc_hi)).fetchall()
+        row = next((x for x in candidates if x['id'] not in touched), None)
+        if not r['destination']:
+            known = c.execute("SELECT destination FROM flights WHERE number=? AND destination<>'' ORDER BY updated DESC LIMIT 1", (r['number'],)).fetchone()
+            if known: r = dict(r, destination=known['destination'])
         if row:
             fid = row['id']; matched += 1
             if not row['start']:
                 c.execute("UPDATE flights SET briefing=?,briefing_manual=1,needs_type=0,done=0,status='Roster',destination=CASE WHEN ?<>'' THEN ? ELSE destination END WHERE id=?",
                           (r['reporting'], r['destination'], r['destination'], fid))
         else:
-            fid = 'ku-' + r['number'] + '-' + r['date']; added += 1
+            fid = 'ku-' + r['number'] + '-' + r['date']
+            if fid in touched: fid += '-' + r['reporting'][11:16].replace(':', '')
+            added += 1
             c.execute("INSERT INTO flights(id,number,destination,aircraft,source,briefing,briefing_manual,sccm,origin,status,done) VALUES(?,?,?,'',?,?,1,'','roster','Roster',0) "
                       "ON CONFLICT(id) DO UPDATE SET briefing=excluded.briefing,briefing_manual=1,needs_type=0,done=0,status='Roster',"
                       "destination=CASE WHEN excluded.destination<>'' THEN excluded.destination ELSE flights.destination END",
                       (fid, r['number'], r['destination'], r['reporting'], r['reporting']))
         if r['crew']: set_crew(c, fid, r['crew'])
+        c.execute('UPDATE flights SET label=? WHERE id=?', (r.get('label') if r.get('label', r['number']) != r['number'] else None, fid))
         touched.add(fid)
     closed = 0
     if full_list:
@@ -530,7 +585,7 @@ def tick():
             c.execute('UPDATE flights SET room=?,start=?,end=? WHERE id=?', (room, stamp(t), stamp(t + timedelta(minutes=10)), row['id']))
 
 
-PUBLIC_FIELDS = ['id', 'number', 'destination', 'aircraft', 'briefing', 'sccm', 'crew', 'room', 'start', 'end', 'done']
+PUBLIC_FIELDS = ['id', 'number', 'label', 'destination', 'aircraft', 'briefing', 'sccm', 'crew', 'room', 'start', 'end', 'done']
 
 
 def snapshot(auth):

@@ -1,1 +1,3 @@
-Flight,Date,Reporting,Destination,Chief Cabin,Chief Cabin 2,FSS Supervisor
+Crew Reporting — DD Mon YYYY,,,,,
+REPT: Kuwait time (UTC+3),,,,,
+FLT,REG,NAME,RANK,STAFF ID,REPT (Kuwait)

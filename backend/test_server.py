@@ -185,4 +185,26 @@ class Tests(unittest.TestCase):
         self.assertEqual(app.parse_reporting('1125', '2026-11-07')[0], '2026-11-07T11:25:00+03:00')
         with self.assertRaises(ValueError): app.parse_reporting('soon', '2026-11-07')
 
+    def test_operations_crew_list_format(self):
+        import shutil
+        here = os.path.dirname(os.path.abspath(__file__))
+        data = ('Crew Reporting Kuwait Airways — Crew Reporting — 09 Nov 2026,,,,,\n'
+                'REPT: Kuwait time (UTC+3). Each matching CCI / FSS / INS is listed separately.,,,,,\n'
+                'FLT,REG,NAME,RANK,STAFF ID,REPT (Kuwait)\n'
+                '545,9K-AOM,Test Two,INS,2,06:15\n545,9K-AOM,TEST THREE,CCI,3,06:15\n'
+                '161,9K-AQA,TEST FIVE,CCI,5,07:20\n161,9K-AQA,TEST SIX,CCI,6,08:25\n'
+                '619,9K-AQB,TEST SEVEN,FSS,7,11:25\n620,9K-AQB,TEST TEN,CCI,10,11:25\n411,9K-AOI,TEST NINE,CCI,9,21:45\n303,9K-APG,TEST EIGHT,CCI,8,00:40\n')
+        rows = app.import_preview({'name': 'list.csv', 'data': csv64(data), 'kind': 'roster'})
+        got = [(r['number'], r['reporting'][5:16], r['crew_text']) for r in rows]
+        self.assertEqual(got[0], ('KU545', '11-09T06:15', 'Test Two (INS) / TEST THREE (CCI)'))
+        self.assertEqual(got[-1], ('KU303', '11-10T00:40', 'TEST EIGHT (CCI)'))
+        self.assertEqual([g[1] for g in got if g[0] == 'KU161'], ['11-09T07:20', '11-09T08:25'])
+        self.assertNotIn('5', ' '.join(r['crew_text'] for r in rows))   # staff IDs are not shown
+        ku619 = next(r for r in rows if r['number'] == 'KU619')
+        self.assertEqual((ku619['label'], ku619['crew_text']), ('KU619 / 620', 'TEST SEVEN (FSS) / TEST TEN (CCI)'))
+        with app.db() as c:
+            r = app.import_rows(c, 'roster', rows, True)
+            self.assertEqual(r['added'], 6)
+            self.assertEqual(c.execute("SELECT count(*) FROM flights WHERE number='KU161' AND done=0").fetchone()[0], 2)
+
 if __name__ == '__main__': unittest.main()

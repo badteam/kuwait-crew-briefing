@@ -169,3 +169,4 @@ body[data-page=admin] .room{font-size:34px;white-space:nowrap}body[data-page=adm
 .crewlist{display:grid;border-top:1px solid var(--line)}.crewlist .sccm{border-top:0;padding:8px 0}.crewlist .sccm:first-child{padding-top:13px}
 .sccm.role-fss b{background:linear-gradient(135deg,#9ddcff,#5cc4ff);color:#03172e}.sccm.role-cci b{background:linear-gradient(135deg,#c9b6ff,#9d84f2);color:#170a3a}
 body.roomview .crewlist .sccm{padding:1.6vh 0}label.check{display:flex;flex-direction:row;align-items:center;gap:8px;font-size:13px;color:var(--ink)}label.check input{width:18px;height:18px;padding:0}
+.sccm.role-ins b{background:linear-gradient(135deg,#7fe0b8,#3fbf8a);color:#04281a}
