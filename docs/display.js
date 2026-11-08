@@ -27,7 +27,7 @@ function render(){
   if(f)content='<div class="flight" dir="ltr">'+esc((f.label||f.number).replace(/^KU/,'KU '))+'</div><div class="destination">'+esc(f.destination)+'</div>'+crewHtml(f)+'<div class="times"><span>'+fmt(f.start)+' – '+fmt(f.end)+'</span><span class="countdown" data-end="'+esc(f.end)+'"></span></div>';
   return '<article class="card '+(f?'active':state?'free':'waiting')+'"><div class="cardtop"><span class="room" dir="ltr">'+room+'</span><span class="status">'+(f?'Briefing in progress':state?'Available':'Waiting for updates')+'</span></div>'+content+'</article>';
  }).join('');
- const queue=flights.filter(f=>!f.done&&!f.start),page=Math.floor(t/15000)%Math.max(1,Math.ceil(queue.length/4)),upcoming=queue.slice(page*4,page*4+4);
+ const queue=flights.filter(f=>!f.done&&!f.start&&f.briefing).sort((a,b)=>new Date(a.briefing)-new Date(b.briefing)),limit=document.body.dataset.orientation==='portrait'||innerHeight>innerWidth?8:5,upcoming=queue.slice(0,limit);
  $('queue').innerHTML=upcoming.length?'<div class="qrow"><span>Flight</span><span>Destination</span><span>Briefing</span><span>Status</span></div>'+upcoming.map(f=>'<div class="qrow"><span dir="ltr">'+esc((f.label||f.number).replace(/^KU/,'KU '))+'</span><span>'+esc(f.destination)+'</span><span dir="ltr">'+df(f.briefing)+' '+fmt(f.briefing)+'</span><span>'+(new Date(f.briefing)<=t?'Waiting for a room':'Upcoming')+'</span></div>').join(''):'<p>'+(state?'No flights in the queue':'Waiting for flight schedule updates')+'</p>';
  clock();
 }
