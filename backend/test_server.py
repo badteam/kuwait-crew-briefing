@@ -1,4 +1,4 @@
-import base64, importlib.util, os, sys, tempfile, unittest
+import base64, importlib.util, json, os, sys, tempfile, unittest
 from datetime import timedelta
 from unittest import mock
 sandbox = tempfile.TemporaryDirectory(); os.environ['DATA_DIR'] = sandbox.name
@@ -149,5 +149,40 @@ class Tests(unittest.TestCase):
             app.store_departures(c, aerodatabox.kuwait_departures(SAMPLE))       # reappears -> reopened, name kept
             row = c.execute("SELECT * FROM flights WHERE number='KU157'").fetchone()
             self.assertEqual((row['done'], row['sccm']), (0, 'Kept'))
+
+    def test_parse_crew(self):
+        self.assertEqual(app.parse_crew('Ahmed Ali / Sara M (FSS)'), [{'role': 'SCCM', 'name': 'Ahmed Ali'}, {'role': 'FSS', 'name': 'Sara M'}])
+        self.assertEqual(app.parse_crew('CCI - Noura Saleh', 'SCCM'), [{'role': 'CCI', 'name': 'Noura Saleh'}])
+        self.assertEqual(app.parse_crew('Fahad, Yousef', 'SCCM'), [{'role': 'SCCM', 'name': 'Fahad'}, {'role': 'SCCM', 'name': 'Yousef'}])
+        self.assertEqual(app.crew_text(app.parse_crew('A / B (CCI)')), 'A / B (CCI)')
+
+    def test_roster_upload_exact_reporting_and_names(self):
+        data = ('Flight,Date,Reporting,Chief Cabin,Chief Cabin 2,FSS Supervisor\n'
+                'KU157,2026-11-07,15:05,Ahmed Ali,,Sara M\n'
+                '619,2026-11-07,11:25,Fahad K,Noura S (CCI),\n')
+        rows = app.import_preview({'name': 'r.csv', 'data': csv64(data), 'kind': 'roster'})
+        self.assertEqual(rows[0]['reporting'], '2026-11-07T15:05:00+03:00')
+        self.assertEqual(rows[0]['crew'], [{'role': 'SCCM', 'name': 'Ahmed Ali'}, {'role': 'FSS', 'name': 'Sara M'}])
+        self.assertEqual(rows[1]['crew'], [{'role': 'SCCM', 'name': 'Fahad K'}, {'role': 'CCI', 'name': 'Noura S'}])
+        with app.db() as c:
+            app.store_departures(c, aerodatabox.kuwait_departures(SAMPLE))      # KU157 (calc 15:25), KU101, KU999
+            r = app.import_rows(c, 'roster', rows, True)
+            self.assertEqual((r['matched'], r['added']), (1, 1)); self.assertEqual(r['closed'], 2)   # KU101 and KU999 not in roster
+            ku157 = c.execute("SELECT * FROM flights WHERE number='KU157'").fetchone()
+            self.assertEqual((ku157['briefing'], ku157['sccm']), ('2026-11-07T15:05:00+03:00', 'Ahmed Ali / Sara M (FSS)'))
+            # A later schedule update neither recalculates the time nor reopens flights missing from the roster.
+            app.store_departures(c, aerodatabox.kuwait_departures(SAMPLE))
+            ku157 = c.execute("SELECT * FROM flights WHERE number='KU157'").fetchone()
+            self.assertEqual((ku157['briefing'], ku157['sccm'], ku157['done']), ('2026-11-07T15:05:00+03:00', 'Ahmed Ali / Sara M (FSS)', 0))
+            self.assertEqual(c.execute("SELECT done FROM flights WHERE number='KU101'").fetchone()[0], 1)
+            self.assertEqual(c.execute("SELECT count(*) FROM flights WHERE number='KU157'").fetchone()[0], 1)
+            ku619 = c.execute("SELECT * FROM flights WHERE number='KU619'").fetchone()
+            self.assertEqual((ku619['briefing'], json.loads(ku619['crew'])[1]['role']), ('2026-11-07T11:25:00+03:00', 'CCI'))
+
+    def test_roster_excel_time_cells(self):
+        self.assertEqual(app.parse_reporting('0.4722222222', '2026-11-07')[0], '2026-11-07T11:20:00+03:00')
+        self.assertEqual(app.parse_reporting('46333.4722222222', '')[0][11:16], '11:20')
+        self.assertEqual(app.parse_reporting('1125', '2026-11-07')[0], '2026-11-07T11:25:00+03:00')
+        with self.assertRaises(ValueError): app.parse_reporting('soon', '2026-11-07')
 
 if __name__ == '__main__': unittest.main()

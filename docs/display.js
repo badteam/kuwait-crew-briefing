@@ -10,6 +10,7 @@ const store={get:k=>{try{return localStorage.getItem(k)}catch{return null}},set:
 let screen=rooms.includes(params.get('screen'))?params.get('screen'):'hall',orientation=params.get('orientation')||'auto';
 let state=null,offset=0,lastFetch=0,busy=false,pairing=null;
 const person='<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7" r="4"/><path d="M4 22v-3a8 8 0 0 1 16 0v3M9 14l3 6 3-6"/></svg>';
+const crewHtml=f=>{const l=f.crew&&f.crew.length?f.crew:[];return l.length?'<div class="crewlist">'+l.map(p=>'<div class="sccm role-'+esc(p.role).toLowerCase()+'">'+person+'<b>'+esc(p.role)+'</b><span>'+esc(p.name)+'</span></div>').join('')+'</div>':'<div class="sccm">'+person+'<b>SCCM</b><span>SCCM not assigned</span></div>'};
 function layout(){
  document.body.dataset.orientation=['auto','portrait','landscape'].includes(orientation)?orientation:'auto';
  document.body.classList.toggle('roomview',screen!=='hall');$('upcoming').hidden=screen!=='hall';
@@ -23,7 +24,7 @@ function render(){
   const f=flights.find(f=>f.room===room&&!f.done&&f.start&&new Date(f.end)>t);
   const next=flights.filter(x=>!x.done&&!x.start&&x.briefing).sort((x,y)=>x.briefing<y.briefing?-1:1)[0];
   let content='<div class="idle">'+(state?'Waiting for the next flight':'Waiting for flight schedule')+'</div>'+(next?'<p class="nextup">Next briefing <b dir="ltr">'+fmt(next.briefing)+'</b> · <span dir="ltr">'+esc(next.number.replace(/^KU/,'KU '))+'</span> '+esc(next.destination)+'</p>':'<p>Wishing you a pleasant flight</p>');
-  if(f)content='<div class="flight" dir="ltr">'+esc(f.number.replace(/^KU/,'KU '))+'</div><div class="destination">'+esc(f.destination)+'</div><div class="sccm">'+person+'<b>SCCM</b><span>'+esc(f.sccm||'SCCM not assigned')+'</span></div><div class="times"><span>'+fmt(f.start)+' – '+fmt(f.end)+'</span><span class="countdown" data-end="'+esc(f.end)+'"></span></div>';
+  if(f)content='<div class="flight" dir="ltr">'+esc(f.number.replace(/^KU/,'KU '))+'</div><div class="destination">'+esc(f.destination)+'</div>'+crewHtml(f)+'<div class="times"><span>'+fmt(f.start)+' – '+fmt(f.end)+'</span><span class="countdown" data-end="'+esc(f.end)+'"></span></div>';
   return '<article class="card '+(f?'active':state?'free':'waiting')+'"><div class="cardtop"><span class="room" dir="ltr">'+room+'</span><span class="status">'+(f?'Briefing in progress':state?'Available':'Waiting for updates')+'</span></div>'+content+'</article>';
  }).join('');
  const queue=flights.filter(f=>!f.done&&!f.start),page=Math.floor(t/15000)%Math.max(1,Math.ceil(queue.length/4)),upcoming=queue.slice(page*4,page*4+4);

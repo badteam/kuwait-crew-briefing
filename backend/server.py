@@ -40,7 +40,7 @@ def migrate():
         cols = {r['name'] for r in c.execute('PRAGMA table_info(flights)')}
         for name, ddl in [('departure', 'TEXT'), ('origin', "TEXT DEFAULT 'import'"), ('needs_type', 'INTEGER DEFAULT 0'),
                           ('aircraft_manual', 'INTEGER DEFAULT 0'), ('status', 'TEXT'), ('updated', 'TEXT'),
-                          ('departure_manual', 'INTEGER DEFAULT 0')]:
+                          ('departure_manual', 'INTEGER DEFAULT 0'), ('briefing_manual', 'INTEGER DEFAULT 0'), ('crew', 'TEXT')]:
             if name not in cols: c.execute(f'ALTER TABLE flights ADD COLUMN {name} {ddl}')
         c.execute('CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT)')
         c.execute('CREATE TABLE IF NOT EXISTS tokens(id TEXT PRIMARY KEY,hash TEXT UNIQUE,role TEXT,screen TEXT,orientation TEXT,label TEXT,created TEXT,expires REAL,last_seen REAL)')
@@ -122,12 +122,76 @@ def gmt_departure(value, date):
 def set_departure(c, row, departure_utc):
     if row['start']: raise ValueError('This briefing has already started.')
     local = stamp(datetime.fromisoformat(departure_utc).astimezone(TZ))
-    briefing = briefing_from_departure(departure_utc, row['aircraft'])
+    briefing = row['briefing'] if row['briefing_manual'] else briefing_from_departure(departure_utc, row['aircraft'])
     c.execute('UPDATE flights SET departure=?,source=?,briefing=?,needs_type=?,departure_manual=1,done=0 WHERE id=?',
               (departure_utc, local, briefing, int(briefing is None), row['id']))
 
 
 def norm(v): return re.sub(r'[\s_\-]+', '', str(v).strip().lower())
+
+
+ROLE_WORDS = {'SCCM': 'SCCM', 'CCI': 'CCI', 'FSS': 'FSS', 'SUPERVISOR': 'FSS', 'CHIEF': 'SCCM', 'PURSER': 'SCCM'}
+ROLE_RE = re.compile(r'\b(SCCM|CCI|FSS|SUPERVISOR)\b', re.I)
+
+
+def parse_crew(text, role='SCCM'):
+    """'Ahmed Ali / Sara (FSS)' -> [{'role': 'SCCM', 'name': 'Ahmed Ali'}, {'role': 'FSS', 'name': 'Sara'}]."""
+    people = []
+    for part in re.split(r'\s*(?:/|\n|;|&|\+|،|,|\|)\s*', str(text or '')):
+        r = role; m = ROLE_RE.search(part)
+        if m:
+            r = ROLE_WORDS[m[1].upper()]
+            part = (part[:m.start()] + ' ' + part[m.end():])
+        name = re.sub(r'\s+', ' ', re.sub(r'^[\s:\-–()]+|[\s:\-–()]+$', '', part)).strip()[:80]
+        if name: people.append({'role': r, 'name': name})
+    return people[:6]
+
+
+def crew_text(people):
+    return ' / '.join(p['name'] + ('' if p['role'] == 'SCCM' else ' (' + p['role'] + ')') for p in people)
+
+
+def crew_of(row):
+    try:
+        people = json.loads(row['crew']) if row['crew'] else None
+    except (ValueError, TypeError):
+        people = None
+    return people if people is not None else parse_crew(row['sccm'])
+
+
+def set_crew(c, flight, text_or_people):
+    people = text_or_people if isinstance(text_or_people, list) else parse_crew(text_or_people)
+    c.execute('UPDATE flights SET sccm=?,crew=? WHERE id=?', (crew_text(people), json.dumps(people, ensure_ascii=False), flight))
+
+
+def roster_dates(c): return set(setting(c, 'roster_dates', []))
+
+
+def kuwait_date(value): return datetime.fromisoformat(value).astimezone(TZ).date().isoformat()
+
+
+def parse_reporting(value, date):
+    """Reporting time from the roster (Kuwait clock, used as is). Returns (iso, has_date)."""
+    s = str(value).strip()
+    if re.fullmatch(r'\d{4,6}\.\d+', s):          # Excel date+time serial
+        t = datetime(1899, 12, 30) + timedelta(minutes=round(float(s) * 1440))
+        return stamp(t.replace(tzinfo=TZ)), True
+    if re.fullmatch(r'0?\.\d+|0', s):              # Excel time only
+        seconds = round(float(s) * 86400); s = f'{seconds // 3600 % 24:02}:{seconds % 3600 // 60:02}'
+    if re.fullmatch(r'\d{3,4}', s): s = s.zfill(4)[:2] + ':' + s.zfill(4)[2:]
+    m = re.fullmatch(r'(\d{1,2})[/.](\d{1,2})[/.](\d{4})[ T]+(\d{1,2}:\d{2})(?::\d{2})?', s)
+    if m: return stamp(datetime.fromisoformat(f'{m[3]}-{int(m[2]):02}-{int(m[1]):02}T{int(m[4][:-3]):02}:{m[4][-2:]}').replace(tzinfo=TZ)), True
+    m = re.fullmatch(r'(\d{1,2}):(\d{2})(?::\d{2})?', s)
+    if m:
+        if date: return stamp(datetime.fromisoformat(f'{date}T{int(m[1]):02}:{m[2]}').replace(tzinfo=TZ)), True
+        t = now().replace(hour=int(m[1]), minute=int(m[2]), second=0, microsecond=0)
+        if t < now() - timedelta(hours=3): t += timedelta(days=1)   # no date: the next occurrence
+        return stamp(t), False
+    try:
+        t = datetime.fromisoformat(s.replace(' ', 'T'))
+        return stamp(t.replace(tzinfo=TZ) if t.tzinfo is None else t.astimezone(TZ)), True
+    except ValueError:
+        raise ValueError('Use HH:MM for the reporting time.')
 
 
 ALIASES = {
@@ -136,7 +200,8 @@ ALIASES = {
     'aircraft': ['aircraft', 'aircrafttype', 'الطائرة', 'الطائره', 'نوعالطائرة'],
     'date': ['date', 'التاريخ'], 'time': ['time', 'filetime', 'الوقت', 'وقتالملف'],
     'sccm': ['sccm', 'chief', 'name', 'رئيسالطاقم'],
-    'std': ['std', 'stdgmt', 'stdutc', 'departuregmt', 'departureutc', 'وقتالاقلاع', 'وقتالإقلاع']}
+    'std': ['std', 'stdgmt', 'stdutc', 'departuregmt', 'departureutc', 'وقتالاقلاع', 'وقتالإقلاع'],
+    'reporting': ['reporting', 'reportingtime', 'report', 'reporttime', 'rpt', 'briefing', 'briefingtime', 'وقتالريبورتينج', 'الريبورتينج', 'وقتالحضور']}
 
 
 def read_rows(data, name):
@@ -167,7 +232,10 @@ def read_rows(data, name):
                 if cell.find('m:f', ns) is not None and cell.findtext('m:v', None, ns) is None:
                     raise ValueError('Convert Excel formulas to values before uploading.')
                 v = cell.findtext('m:v', '', ns); typ = cell.get('t')
-                row[idx - 1] = shared[int(v)] if typ == 's' else ''.join(cell.find('m:is', ns).itertext()) if typ == 'inlineStr' else v
+                if typ == 's': v = shared[int(v)] if v.isdigit() and int(v) < len(shared) else ''
+                elif typ == 'inlineStr':
+                    node = cell.find('m:is', ns); v = ''.join(node.itertext()) if node is not None else v
+                row[idx - 1] = v
             rows.append(row)
         return rows
 
@@ -188,6 +256,7 @@ def import_preview(payload):
     for i, v in enumerate(rows[0]):
         for key, aliases in ALIASES.items():
             if norm(v) in aliases and key not in mapping: mapping[key] = i
+    if payload.get('kind') == 'roster': return roster_preview(rows, mapping)
     crew = payload.get('kind') == 'crew'
     required = ['number', 'sccm'] if crew else ['number', 'destination', 'aircraft', 'time']
     if any(k not in mapping for k in required): raise ValueError('Required columns: ' + ', '.join(required))
@@ -222,19 +291,83 @@ def import_preview(payload):
     return result
 
 
+def roster_preview(rows, mapping):
+    if 'number' not in mapping or 'reporting' not in mapping: raise ValueError('Required columns: flight, reporting')
+    name_cols = []
+    for i, header in enumerate(rows[0]):
+        h = norm(header)
+        if i in (mapping.get('number'), mapping.get('reporting'), mapping.get('date'), mapping.get('destination')): continue
+        if 'fss' in h or 'supervisor' in h or 'سوبر' in h: name_cols.append((i, 'FSS'))
+        elif 'cci' in h: name_cols.append((i, 'CCI'))
+        elif any(k in h for k in ('sccm', 'chief', 'cabin', 'crew', 'name', 'رئيس', 'شيف', 'اسم')): name_cols.append((i, 'SCCM'))
+    result = []; seen = set()
+    for n, row in enumerate(rows[1:], 2):
+        def cell(i): return str(row[i]).strip() if i is not None and i < len(row) else ''
+        number = re.sub(r'\s+', '', cell(mapping['number']).upper())
+        if re.fullmatch(r'\d{1,4}', number): number = 'KU' + number
+        if not re.fullmatch(r'[A-Z0-9]{2,3}\d{1,4}[A-Z]?', number): raise ValueError('Invalid flight number in row ' + str(n))
+        date = excel_date(cell(mapping.get('date')))
+        if date and not re.fullmatch(r'\d{4}-\d{2}-\d{2}', date): raise ValueError('Use YYYY-MM-DD dates (row ' + str(n) + ').')
+        try: reporting, dated = parse_reporting(cell(mapping['reporting']), date)
+        except ValueError: raise ValueError('Invalid reporting time in row ' + str(n) + '; use HH:MM.')
+        people = []
+        for i, role in name_cols: people += parse_crew(cell(i), role)
+        key = number + '|' + reporting
+        if key in seen: raise ValueError('Duplicate flight in row ' + str(n))
+        seen.add(key)
+        result.append({'number': number, 'date': reporting[:10], 'reporting': reporting, 'dated': dated,
+                       'destination': cell(mapping.get('destination'))[:120], 'crew': people[:6], 'crew_text': crew_text(people[:6])})
+    return result
+
+
+def import_roster(c, rows, full_list):
+    """Reporting times from the roster are used as is and are never recalculated."""
+    touched = set(); matched = added = 0
+    for r in rows:
+        rep_ = datetime.fromisoformat(r['reporting'])
+        lo, hi = stamp(rep_ - timedelta(hours=6)), stamp(rep_ + timedelta(hours=6))
+        utc_lo = rep_.astimezone(timezone.utc).isoformat(timespec='seconds'); utc_hi = (rep_ + timedelta(hours=6)).astimezone(timezone.utc).isoformat(timespec='seconds')
+        row = c.execute("SELECT * FROM flights WHERE number=? AND ((briefing>=? AND briefing<=?) OR (briefing IS NULL AND departure>=? AND departure<=?)) "
+                        "ORDER BY start IS NOT NULL, done", (r['number'], lo, hi, utc_lo, utc_hi)).fetchone()
+        if row:
+            fid = row['id']; matched += 1
+            if not row['start']:
+                c.execute("UPDATE flights SET briefing=?,briefing_manual=1,needs_type=0,done=0,status='Roster',destination=CASE WHEN ?<>'' THEN ? ELSE destination END WHERE id=?",
+                          (r['reporting'], r['destination'], r['destination'], fid))
+        else:
+            fid = 'ku-' + r['number'] + '-' + r['date']; added += 1
+            c.execute("INSERT INTO flights(id,number,destination,aircraft,source,briefing,briefing_manual,sccm,origin,status,done) VALUES(?,?,?,'',?,?,1,'','roster','Roster',0) "
+                      "ON CONFLICT(id) DO UPDATE SET briefing=excluded.briefing,briefing_manual=1,needs_type=0,done=0,status='Roster',"
+                      "destination=CASE WHEN excluded.destination<>'' THEN excluded.destination ELSE flights.destination END",
+                      (fid, r['number'], r['destination'], r['reporting'], r['reporting']))
+        if r['crew']: set_crew(c, fid, r['crew'])
+        touched.add(fid)
+    closed = 0
+    if full_list:
+        dates = {r['date'] for r in rows}
+        for row in c.execute('SELECT id,briefing,departure FROM flights WHERE done=0 AND start IS NULL').fetchall():
+            day = row['briefing'][:10] if row['briefing'] else (kuwait_date(row['departure']) if row['departure'] else None)
+            if day in dates and row['id'] not in touched:
+                c.execute("UPDATE flights SET done=1,status='Not in roster' WHERE id=?", (row['id'],)); closed += 1
+        keep = sorted((roster_dates(c) | dates))[-14:]
+        put_setting(c, 'roster_dates', keep)
+    return {'count': len(rows), 'matched': matched, 'added': added, 'closed': closed}
+
+
 def match_flight(c, number, date):
     """Open flights with this number; a date may be the Kuwait or GMT departure date."""
     return c.execute("SELECT id FROM flights WHERE number=? AND done=0 AND (?='' OR substr(source,1,10)=? OR substr(departure,1,10)=?)",
                      (number, date, date, date)).fetchall()
 
 
-def import_rows(c, kind, rows):
+def import_rows(c, kind, rows, full_list=False):
+    if kind == 'roster': return import_roster(c, rows, full_list)
     if kind == 'crew':
         matched = pending = 0; problems = []
         for r in rows:
             found = match_flight(c, r['number'], r['date'])
             if len(found) == 1:
-                c.execute('UPDATE flights SET sccm=? WHERE id=?', (r['sccm'], found[0]['id'])); matched += 1
+                set_crew(c, found[0]['id'], r['sccm']); matched += 1
                 if r.get('std'):
                     row = c.execute('SELECT * FROM flights WHERE id=?', (found[0]['id'],)).fetchone()
                     if not row['start']: set_departure(c, row, r['std'])
@@ -267,15 +400,22 @@ def store_departures(c, departures, window=None):
     With a window (start, end) in UTC, feed flights in that window that the source no longer
     lists (and that have not started or been edited) are closed as 'Not in schedule'.
     """
-    t = stamp(now()); added = updated = 0; seen = set()
+    t = stamp(now()); added = updated = 0; seen = set(); rdates = roster_dates(c)
     for f in departures:
-        fid = flight_id(f['number'], f['departure_utc']); seen.add(fid)
+        fid = flight_id(f['number'], f['departure_utc'])
         local = stamp(datetime.fromisoformat(f['departure_utc']).astimezone(TZ))
+        dep = datetime.fromisoformat(f['departure_utc'])
+        linked = c.execute('SELECT id FROM flights WHERE number=? AND briefing_manual=1 AND briefing>=? AND briefing<=?',
+                           (f['number'], stamp(dep - timedelta(hours=6)), stamp(dep))).fetchone()
+        if linked: fid = linked['id']
+        seen.add(fid)
         row = c.execute('SELECT * FROM flights WHERE id=?', (fid,)).fetchone()
         cancelled = str(f.get('status') or '').lower().startswith('cancel')
         if row is None:
             aircraft = f.get('aircraft') or ''
             briefing = briefing_from_departure(f['departure_utc'], aircraft)
+            if local[:10] in rdates or (briefing and briefing[:10] in rdates):
+                cancelled = True; f = dict(f, status='Not in roster')
             c.execute("INSERT INTO flights(id,number,destination,aircraft,source,departure,briefing,sccm,origin,needs_type,status,updated,done) "
                       "VALUES(?,?,?,?,?,?,?,'','feed',?,?,?,?)",
                       (fid, f['number'], f.get('destination') or '', aircraft, local, f['departure_utc'], briefing,
@@ -283,12 +423,17 @@ def store_departures(c, departures, window=None):
             local_date, utc_date = local[:10], f['departure_utc'][:10]
             pending = c.execute('SELECT * FROM crew_pending WHERE number=? AND date IN (?,?)', (f['number'], local_date, utc_date)).fetchone()
             if pending:
-                c.execute('UPDATE flights SET sccm=? WHERE id=?', (pending['sccm'], fid))
+                set_crew(c, fid, pending['sccm'])
                 if pending['std']: set_departure(c, c.execute('SELECT * FROM flights WHERE id=?', (fid,)).fetchone(), pending['std'])
                 c.execute('DELETE FROM crew_pending WHERE number=? AND date=?', (pending['number'], pending['date']))
             added += 1
             continue
         aircraft = row['aircraft'] if row['aircraft_manual'] else (f.get('aircraft') or row['aircraft'] or '')
+        if row['briefing_manual']:   # roster flight: reporting time and status come from the roster
+            c.execute('UPDATE flights SET destination=?,aircraft=?,departure=?,updated=? WHERE id=?',
+                      (row['destination'] or f.get('destination') or '', aircraft, row['departure'] if row['departure_manual'] else f['departure_utc'], t, fid))
+            updated += 1; continue
+        if row['status'] == 'Not in roster': cancelled = True; f = dict(f, status='Not in roster')
         if row['start'] is None:
             departure = row['departure'] if row['departure_manual'] else f['departure_utc']
             local = stamp(datetime.fromisoformat(departure).astimezone(TZ))
@@ -301,7 +446,7 @@ def store_departures(c, departures, window=None):
         updated += 1
     if window:
         lo, hi = (w.astimezone(timezone.utc).isoformat(timespec='seconds') for w in window)
-        for row in c.execute("SELECT id FROM flights WHERE origin='feed' AND done=0 AND start IS NULL AND departure_manual=0 AND departure>=? AND departure<?", (lo, hi)).fetchall():
+        for row in c.execute("SELECT id FROM flights WHERE origin='feed' AND done=0 AND start IS NULL AND departure_manual=0 AND briefing_manual=0 AND departure>=? AND departure<?", (lo, hi)).fetchall():
             if row['id'] not in seen:
                 c.execute("UPDATE flights SET done=1,status='Not in schedule',updated=? WHERE id=?", (t, row['id']))
     return added, updated
@@ -385,14 +530,14 @@ def tick():
             c.execute('UPDATE flights SET room=?,start=?,end=? WHERE id=?', (room, stamp(t), stamp(t + timedelta(minutes=10)), row['id']))
 
 
-PUBLIC_FIELDS = ['id', 'number', 'destination', 'aircraft', 'briefing', 'sccm', 'room', 'start', 'end', 'done']
+PUBLIC_FIELDS = ['id', 'number', 'destination', 'aircraft', 'briefing', 'sccm', 'crew', 'room', 'start', 'end', 'done']
 
 
 def snapshot(auth):
     tick()
     recent = stamp(now() - timedelta(hours=1))
     with db() as c:
-        rows = [dict(r) for r in c.execute(
+        rows = [dict(r, crew=crew_of(r)) for r in c.execute(
             'SELECT * FROM flights WHERE done=0 OR end>? ORDER BY briefing IS NULL,briefing,departure,number', (recent,))]
         feed = setting(c, 'feed', {})
         state = {'now': stamp(now()), 'rooms': ROOMS, 'timezone': 'Asia/Kuwait',
@@ -528,12 +673,12 @@ class Handler(BaseHTTPRequestHandler):
         if path in ('/api/preview', '/api/import'):
             rows = import_preview(p)
             if path == '/api/preview': return self.send(200, {'rows': rows})
-            with LOCK, db() as c: result = import_rows(c, p.get('kind'), rows)
+            with LOCK, db() as c: result = import_rows(c, p.get('kind'), rows, bool(p.get('full_list')))
             return self.send(200, result)
         if path == '/api/sccm':
-            name = re.sub(r'\s+', ' ', str(p.get('sccm', ''))).strip()[:120]
             with LOCK, db() as c:
-                if not c.execute('UPDATE flights SET sccm=? WHERE id=?', (name, str(p.get('id')))).rowcount: raise ValueError('Flight not found.')
+                if not c.execute('SELECT 1 FROM flights WHERE id=?', (str(p.get('id')),)).fetchone(): raise ValueError('Flight not found.')
+                set_crew(c, str(p.get('id')), str(p.get('sccm', ''))[:300])
             return self.send(200, {'ok': True})
         if path == '/api/aircraft':
             aircraft = str(p.get('aircraft', '')).strip()[:24]; aircraft_offset(aircraft)
@@ -542,7 +687,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not row or not row['departure']: raise ValueError('Flight not found.')
                 if row['start']: raise ValueError('This briefing has already started.')
                 c.execute('UPDATE flights SET aircraft=?,aircraft_manual=1,needs_type=0,briefing=? WHERE id=?',
-                          (aircraft, briefing_from_departure(row['departure'], aircraft), row['id']))
+                          (aircraft, row['briefing'] if row['briefing_manual'] else briefing_from_departure(row['departure'], aircraft), row['id']))
             return self.send(200, {'ok': True})
         if path == '/api/departure':
             with LOCK, db() as c:
