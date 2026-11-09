@@ -37,8 +37,8 @@ function flightsTable(){
 function board(){
  const t=Date.now()+offset;
  $('board').innerHTML=rooms.map(room=>{const f=state.flights.find(f=>f.room===room&&!f.done&&f.start&&new Date(f.end)>t);
-  const content=f?'<div class="flight" dir="ltr">'+esc(f.label||f.number)+'</div><div class="destination">'+esc(f.destination)+'</div>'+crewHtml(f)+'<div class="times"><span>'+fmt(f.start)+' – '+fmt(f.end)+'</span><span class="countdown" data-end="'+esc(f.end)+'"></span></div><button class="extend" data-extend="'+esc(f.id)+'">Extend by 5 minutes</button>':'<div class="idle">Available</div>';
-  return '<article class="card '+(f?'active':'free')+'"><div class="cardtop"><span class="room" dir="ltr">'+room+'</span><span class="status">'+(f?'Briefing in progress':'Available')+'</span></div>'+content+'</article>'}).join('');
+  const content=f?'<div class="flight" dir="ltr">'+esc(f.label||f.number)+'</div><div class="destination">'+esc(f.destination)+'</div>'+crewHtml(f)+'<div class="times"><span>Reporting '+fmt(f.briefing)+' · until '+fmt(f.end)+'</span><span class="countdown" data-brief="'+esc(f.briefing)+'" data-end="'+esc(f.end)+'"></span></div><button class="extend" data-extend="'+esc(f.id)+'">Extend by 5 minutes</button>':'<div class="idle">Available</div>';
+  return '<article class="card '+(f?'active':'free')+'"><div class="cardtop"><span class="room" dir="ltr">'+room+'</span><span class="status">'+(f?(new Date(f.briefing)>t?'Reporting at '+fmt(f.briefing):'Briefing in progress'):'Available')+'</span></div>'+content+'</article>'}).join('');
 }
 function displays(){
  const list=state.displays||[],opt=(vals,cur,label)=>vals.map(v=>'<option value="'+v+'"'+(v===cur?' selected':'')+'>'+esc(label(v))+'</option>').join('');
@@ -47,7 +47,7 @@ function displays(){
 function render(){if(!state)return;if(!editing)feedPanel();if(!editing){flightsTable();displays()}board();tickClock()}
 function tickClock(){
  $('clock').textContent=fmt(Date.now()+offset);
- document.querySelectorAll('[data-end]').forEach(el=>{const n=Math.max(0,Math.ceil((new Date(el.dataset.end)-Date.now()-offset)/1000));el.textContent='Remaining '+Math.floor(n/60)+':'+String(n%60).padStart(2,'0')});
+ document.querySelectorAll('[data-end]').forEach(el=>{const now=Date.now()+offset,b=el.dataset.brief?new Date(el.dataset.brief):0,before=b&&b>now,n=Math.max(0,Math.ceil(((before?b:new Date(el.dataset.end))-now)/1000)),txt=(before?'Starts in ':'Remaining ')+Math.floor(n/60)+':'+String(n%60).padStart(2,'0');el.textContent=txt;el.classList.toggle('before',!!before);const card=el.closest('.card');if(card){card.classList.toggle('upnext',!!before);const st=card.querySelector('.status');if(st&&card.classList.contains('active'))st.textContent=before?'Reporting at '+fmt(b):'Briefing in progress'}});
  if(lastFetch&&Date.now()-lastFetch>20000)$('connection').textContent='Connection lost';
 }
 async function refresh(){if(!token)return;try{state=await api('/api/state');offset=new Date(state.now)-Date.now();lastFetch=Date.now();$('connection').textContent='● Connected';showSetup(false);render()}catch(e){$('connection').textContent='Connection lost';if(token)notice(e.message,true)}}

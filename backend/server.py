@@ -27,6 +27,8 @@ UNITS_PER_CALL = 2
 FA_MONTHLY_PAGES = int(os.environ.get('FLIGHTAWARE_MONTHLY_PAGES', '500'))   # ~$2.50 at $0.005/page
 PROVIDERS = {'aerodatabox': aerodatabox, 'flightaware': flightaware}
 ADMIN_HOURS = 12
+PRESHOW = int(os.environ.get('PRESHOW_MINUTES', '30'))   # room shown this long before reporting time
+SESSION = 10
 DISPLAY_DAYS = 365
 
 
@@ -578,11 +580,14 @@ def tick():
         c.execute('UPDATE flights SET done=1 WHERE done=0 AND start IS NULL AND briefing<?', (stamp(t - timedelta(hours=2)),))
         c.execute("UPDATE flights SET done=1 WHERE done=0 AND start IS NULL AND briefing IS NULL AND departure IS NOT NULL AND departure<?",
                   (t.astimezone(timezone.utc).isoformat(timespec='seconds'),))
-        queue = c.execute('SELECT id FROM flights WHERE done=0 AND start IS NULL AND briefing IS NOT NULL AND briefing<=? ORDER BY briefing,number',
-                          (stamp(t),)).fetchall()
+        # A flight takes a room PRESHOW minutes before its reporting time (earliest reporting first) and keeps it
+        # until its 10-minute briefing ends; if rooms are full it waits for the first free one.
+        queue = c.execute('SELECT id,briefing FROM flights WHERE done=0 AND start IS NULL AND briefing IS NOT NULL AND briefing<=? ORDER BY briefing,number',
+                          (stamp(t + timedelta(minutes=PRESHOW)),)).fetchall()
         free = [r for r in ROOMS if r not in busy]
         for room, row in zip(free, queue):
-            c.execute('UPDATE flights SET room=?,start=?,end=? WHERE id=?', (room, stamp(t), stamp(t + timedelta(minutes=10)), row['id']))
+            end = max(parse_time(row['briefing']), t) + timedelta(minutes=SESSION)
+            c.execute('UPDATE flights SET room=?,start=?,end=? WHERE id=?', (room, stamp(t), stamp(end), row['id']))
 
 
 PUBLIC_FIELDS = ['id', 'number', 'label', 'destination', 'aircraft', 'briefing', 'sccm', 'crew', 'room', 'start', 'end', 'done']

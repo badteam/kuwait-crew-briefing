@@ -207,4 +207,30 @@ class Tests(unittest.TestCase):
             self.assertEqual(r['added'], 6)
             self.assertEqual(c.execute("SELECT count(*) FROM flights WHERE number='KU161' AND done=0").fetchone()[0], 2)
 
+    def test_room_shown_30_minutes_before_reporting(self):
+        t = app.now()
+        with app.db() as c:
+            c.execute('INSERT INTO flights(id,number,briefing) VALUES(?,?,?)', ('soon', 'KU1', app.stamp(t + timedelta(minutes=20))))
+            c.execute('INSERT INTO flights(id,number,briefing) VALUES(?,?,?)', ('later', 'KU2', app.stamp(t + timedelta(minutes=45))))
+        app.tick()
+        with app.db() as c:
+            soon = c.execute("SELECT * FROM flights WHERE id='soon'").fetchone()
+            self.assertEqual(soon['room'], 'A-1')
+            self.assertEqual(soon['end'], app.stamp(t + timedelta(minutes=30)))   # reporting + 10 minutes
+            self.assertIsNone(c.execute("SELECT room FROM flights WHERE id='later'").fetchone()[0])
+
+    def test_full_rooms_nearest_reporting_first(self):
+        t = app.now()
+        with app.db() as c:
+            for i in range(7): c.execute('INSERT INTO flights(id,number,briefing) VALUES(?,?,?)', (f'b{i}', f'KU{i}', app.stamp(t + timedelta(minutes=5))))
+            c.execute('INSERT INTO flights(id,number,briefing) VALUES(?,?,?)', ('late', 'KU8', app.stamp(t + timedelta(minutes=25))))
+            c.execute('INSERT INTO flights(id,number,briefing) VALUES(?,?,?)', ('early', 'KU9', app.stamp(t + timedelta(minutes=10))))
+        app.tick()
+        with app.db() as c:
+            c.execute("UPDATE flights SET end=? WHERE id='b0'", (app.stamp(t - timedelta(seconds=1)),))
+        app.tick()
+        with app.db() as c:
+            self.assertIsNotNone(c.execute("SELECT room FROM flights WHERE id='early'").fetchone()[0])
+            self.assertIsNone(c.execute("SELECT room FROM flights WHERE id='late'").fetchone()[0])
+
 if __name__ == '__main__': unittest.main()

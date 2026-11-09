@@ -24,11 +24,11 @@ function render(){
   const f=flights.find(f=>f.room===room&&!f.done&&f.start&&new Date(f.end)>t);
   const next=flights.filter(x=>!x.done&&!x.start&&x.briefing).sort((x,y)=>x.briefing<y.briefing?-1:1)[0];
   let content='<div class="idle">'+(state?'Waiting for the next flight':'Waiting for flight schedule')+'</div>'+(next?'<p class="nextup">Next briefing <b dir="ltr">'+fmt(next.briefing)+'</b> · <span dir="ltr">'+esc(next.number.replace(/^KU/,'KU '))+'</span> '+esc(next.destination)+'</p>':'<p>Wishing you a pleasant flight</p>');
-  if(f)content='<div class="flight" dir="ltr">'+esc((f.label||f.number).replace(/^KU/,'KU '))+'</div><div class="destination">'+esc(f.destination)+'</div>'+crewHtml(f)+'<div class="times"><span>'+fmt(f.start)+' – '+fmt(f.end)+'</span><span class="countdown" data-end="'+esc(f.end)+'"></span></div>';
-  return '<article class="card '+(f?'active':state?'free':'waiting')+'"><div class="cardtop"><span class="room" dir="ltr">'+room+'</span><span class="status">'+(f?'Briefing in progress':state?'Available':'Waiting for updates')+'</span></div>'+content+'</article>';
+  if(f)content='<div class="flight" dir="ltr">'+esc((f.label||f.number).replace(/^KU/,'KU '))+'</div><div class="destination">'+esc(f.destination)+'</div>'+crewHtml(f)+'<div class="times"><span>Reporting '+fmt(f.briefing)+' · until '+fmt(f.end)+'</span><span class="countdown" data-brief="'+esc(f.briefing)+'" data-end="'+esc(f.end)+'"></span></div>';
+  return '<article class="card '+(f?'active':state?'free':'waiting')+'"><div class="cardtop"><span class="room" dir="ltr">'+room+'</span><span class="status">'+(f?(new Date(f.briefing)>t?'Reporting at '+fmt(f.briefing):'Briefing in progress'):state?'Available':'Waiting for updates')+'</span></div>'+content+'</article>';
  }).join('');
  const queue=flights.filter(f=>!f.done&&!f.start&&f.briefing).sort((a,b)=>new Date(a.briefing)-new Date(b.briefing)),limit=document.body.dataset.orientation==='portrait'||innerHeight>innerWidth?8:5,upcoming=queue.slice(0,limit);
- $('queue').innerHTML=upcoming.length?'<div class="qrow"><span>Flight</span><span>Destination</span><span>Briefing</span><span>Status</span></div>'+upcoming.map(f=>'<div class="qrow"><span dir="ltr">'+esc((f.label||f.number).replace(/^KU/,'KU '))+'</span><span>'+esc(f.destination)+'</span><span dir="ltr">'+df(f.briefing)+' '+fmt(f.briefing)+'</span><span>'+(new Date(f.briefing)<=t?'Waiting for a room':'Upcoming')+'</span></div>').join(''):'<p>'+(state?'No flights in the queue':'Waiting for flight schedule updates')+'</p>';
+ $('queue').innerHTML=upcoming.length?'<div class="qrow"><span>Flight</span><span>Destination</span><span>Briefing</span><span>Status</span></div>'+upcoming.map(f=>'<div class="qrow"><span dir="ltr">'+esc((f.label||f.number).replace(/^KU/,'KU '))+'</span><span>'+esc(f.destination)+'</span><span dir="ltr">'+df(f.briefing)+' '+fmt(f.briefing)+'</span><span>'+(new Date(f.briefing)-1800000<=t?'Waiting for a room':'Upcoming')+'</span></div>').join(''):'<p>'+(state?'No flights in the queue':'Waiting for flight schedule updates')+'</p>';
  clock();
 }
 function feedNotice(){
@@ -39,7 +39,7 @@ function feedNotice(){
 }
 function clock(){
  $('clock').textContent=fmt(Date.now()+offset);
- document.querySelectorAll('[data-end]').forEach(el=>{const n=Math.max(0,Math.ceil((new Date(el.dataset.end)-Date.now()-offset)/1000));el.textContent='Remaining '+Math.floor(n/60)+':'+String(n%60).padStart(2,'0')});
+ document.querySelectorAll('[data-end]').forEach(el=>{const now=Date.now()+offset,b=el.dataset.brief?new Date(el.dataset.brief):0,before=b&&b>now,n=Math.max(0,Math.ceil(((before?b:new Date(el.dataset.end))-now)/1000)),txt=(before?'Starts in ':'Remaining ')+Math.floor(n/60)+':'+String(n%60).padStart(2,'0');el.textContent=txt;el.classList.toggle('before',!!before);const card=el.closest('.card');if(card){card.classList.toggle('upnext',!!before);const st=card.querySelector('.status');if(st&&card.classList.contains('active'))st.textContent=before?'Reporting at '+fmt(b):'Briefing in progress'}});
  if(!demo&&!pairing&&lastFetch&&Date.now()-lastFetch>20000){document.body.classList.add('stale');$('notice').textContent='Updates interrupted — please check with the flight dispatcher.'}
 }
 async function post(path,body){const r=await fetch(API+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(12000)});return [r.status,await r.json().catch(()=>({}))]}
