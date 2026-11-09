@@ -382,7 +382,8 @@ def import_roster(c, rows, full_list):
         lo, hi = stamp(rep_ - timedelta(hours=6)), stamp(rep_ + timedelta(hours=6))
         utc_lo = rep_.astimezone(timezone.utc).isoformat(timespec='seconds'); utc_hi = (rep_ + timedelta(hours=6)).astimezone(timezone.utc).isoformat(timespec='seconds')
         candidates = c.execute("SELECT * FROM flights WHERE number=? AND ((briefing>=? AND briefing<=?) OR (briefing IS NULL AND departure>=? AND departure<=?)) "
-                               "ORDER BY start IS NOT NULL, done", (r['number'], lo, hi, utc_lo, utc_hi)).fetchall()
+                               "ORDER BY abs(julianday(coalesce(briefing, departure)) - julianday(?)), start IS NOT NULL, done",
+                               (r['number'], lo, hi, utc_lo, utc_hi, r['reporting'])).fetchall()
         row = next((x for x in candidates if x['id'] not in touched), None)
         if not r['destination']:
             known = c.execute("SELECT destination FROM flights WHERE number=? AND destination<>'' ORDER BY updated DESC LIMIT 1", (r['number'],)).fetchone()

@@ -233,4 +233,26 @@ class Tests(unittest.TestCase):
             self.assertIsNotNone(c.execute("SELECT room FROM flights WHERE id='early'").fetchone()[0])
             self.assertIsNone(c.execute("SELECT room FROM flights WHERE id='late'").fetchone()[0])
 
+    def test_reupload_same_day_never_duplicates(self):
+        head = 'SCCM REPORTING — 10 NOV 2026,,,,,,,\nComplete reporting day,,,,,,,\nFLT,REG,A/C TYPE,SCCM NAME,RANK,STAFF ID,REPT,PAIRING\n'
+        small = head + ('KU161,9K-AQA,32Q,TEST A,CCI,1,07:20,C1\nKU161,9K-AQB,32Q,TEST B,CCI,2,08:25,C2\n'
+                        'KU619,9K-AQC,32Q,TEST C,FSS,3,11:25,C3\nKU620,9K-AQC,32Q,TEST D,CCI,4,11:25,C4\n')
+        bigger = small.replace('TEST A', 'TEST A2') + 'KU101,9K-AOH,77W,TEST E,CCI,5,08:00,C5\nKU161 (DHD),9K-AQA,32Q,TEST F,CCI,6,09:00,D1\n'
+        def upload(text):
+            rows = app.import_preview({'name': 'day.csv', 'data': csv64(text), 'kind': 'roster'})
+            with app.db() as c: return app.import_rows(c, 'roster', rows, True)
+        first = upload(small)
+        self.assertEqual((first['added'], first['matched']), (3, 0))
+        again = upload(small)
+        self.assertEqual((again['added'], again['matched']), (0, 3))
+        third = upload(bigger)
+        self.assertEqual((third['added'], third['matched']), (1, 3))
+        with app.db() as c:
+            rows = c.execute("SELECT number,briefing,sccm FROM flights WHERE done=0 ORDER BY briefing").fetchall()
+            self.assertEqual(len(rows), 4)
+            self.assertEqual([(r['number'], r['briefing'][11:16]) for r in rows],
+                             [('KU161', '07:20'), ('KU101', '08:00'), ('KU161', '08:25'), ('KU619', '11:25')])
+            self.assertEqual(rows[0]['sccm'], 'TEST A2 (CCI)')   # the newer file wins
+            self.assertEqual(rows[2]['sccm'], 'TEST B (CCI)')    # second KU161 keeps its own time and name
+
 if __name__ == '__main__': unittest.main()
