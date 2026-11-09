@@ -199,7 +199,7 @@ def parse_reporting(value, date):
 ALIASES = {
     'number': ['flight', 'flightnumber', 'flightno', 'flt', 'fltno', 'رقمالرحلة', 'رقمالرحله'],
     'destination': ['destination', 'flightname', 'الوجهة', 'الوجهه', 'اسمالرحلة', 'اسمالرحله'],
-    'aircraft': ['aircraft', 'aircrafttype', 'الطائرة', 'الطائره', 'نوعالطائرة'],
+    'aircraft': ['aircraft', 'aircrafttype', 'a/ctype', 'actype', 'a/c', 'ac', 'type', 'الطائرة', 'الطائره', 'نوعالطائرة'],
     'date': ['date', 'التاريخ'], 'time': ['time', 'filetime', 'الوقت', 'وقتالملف'],
     'sccm': ['sccm', 'chief', 'name', 'رئيسالطاقم'],
     'std': ['std', 'stdgmt', 'stdutc', 'departuregmt', 'departureutc', 'وقتالاقلاع', 'وقتالإقلاع'],
@@ -322,23 +322,26 @@ def clean_name(name):
 
 def roster_preview(rows, mapping, titles=''):
     if 'number' not in mapping or 'reporting' not in mapping: raise ValueError('Required columns: flight (FLT), reporting time (REPT)')
-    used = {mapping.get(k) for k in ('number', 'reporting', 'date', 'destination', 'rank', 'reg')}
+    used = {mapping.get(k) for k in ('number', 'reporting', 'date', 'destination', 'rank', 'reg', 'aircraft')}
     name_cols = []
     for i, header in enumerate(rows[0]):
         h = norm(header)
-        if i in used or 'id' in h or 'staff' in h or 'reg' == h: continue
+        if i in used or 'id' in h or 'staff' in h or h in ('reg', 'pairing') or 'type' in h: continue
         if 'fss' in h or 'supervisor' in h or 'سوبر' in h: name_cols.append((i, 'FSS'))
         elif 'cci' in h: name_cols.append((i, 'CCI'))
         elif any(k in h for k in ('sccm', 'chief', 'cabin', 'crew', 'name', 'رئيس', 'شيف', 'اسم')): name_cols.append((i, 'SCCM'))
     default_date = date_from_text(titles)
-    groups = {}; order = []; latest = None
+    groups = {}; order = []; latest = None; skipped = []
     for n, row in enumerate(rows[1:], 2):
         def cell(i): return str(row[i]).strip() if i is not None and i < len(row) else ''
-        raw = cell(mapping['number'])
+        raw = cell(mapping['number']).upper()
         if not raw: continue
-        number = re.sub(r'\s+', '', raw.upper())
+        tag = ' '.join(re.findall(r'\(([^)]*)\)', raw))
+        number = re.sub(r'\s+', '', re.sub(r'\([^)]*\)', '', raw))
         if re.fullmatch(r'\d{1,4}', number): number = 'KU' + number
-        if not re.fullmatch(r'[A-Z0-9]{2,3}\d{1,4}[A-Z]?', number): raise ValueError('Invalid flight number in row ' + str(n))
+        if not re.fullmatch(r'[A-Z0-9]{2}[A-Z]?[A-Z0-9]{1,5}', number): raise ValueError('Invalid flight number "' + raw + '" in row ' + str(n))
+        if 'DHD' in tag or 'TAXI' in tag:   # deadheading crews travel as passengers: no briefing room
+            skipped.append(number + ' (' + tag + ')'); continue
         date = excel_date(cell(mapping.get('date')))
         if date and not re.fullmatch(r'\d{4}-\d{2}-\d{2}', date): raise ValueError('Use YYYY-MM-DD dates (row ' + str(n) + ').')
         try: reporting, dated = parse_reporting(cell(mapping['reporting']), date or default_date)
@@ -356,12 +359,13 @@ def roster_preview(rows, mapping, titles=''):
         key = (reg or number, reporting)   # same aircraft and time = one crew briefing (e.g. KU619 / KU620)
         if key not in groups:
             groups[key] = {'number': number, 'numbers': [], 'date': reporting[:10], 'reporting': reporting, 'dated': dated or bool(default_date),
-                           'destination': cell(mapping.get('destination'))[:120], 'crew': []}
+                           'destination': cell(mapping.get('destination'))[:120], 'aircraft': cell(mapping.get('aircraft'))[:24], 'crew': []}
             order.append(key)
         if number not in groups[key]['numbers']: groups[key]['numbers'].append(number)
         for p in people:
             if p['name'] and p not in groups[key]['crew']: groups[key]['crew'].append(p)
     if not order: raise ValueError('No flights found in the file.')
+    roster_preview.skipped = skipped
     result = []
     for key in order:
         g = groups[key]; g['crew'] = g['crew'][:6]; g['crew_text'] = crew_text(g['crew'])
@@ -397,6 +401,7 @@ def import_roster(c, rows, full_list):
                       "destination=CASE WHEN excluded.destination<>'' THEN excluded.destination ELSE flights.destination END",
                       (fid, r['number'], r['destination'], r['reporting'], r['reporting']))
         if r['crew']: set_crew(c, fid, r['crew'])
+        if r.get('aircraft'): c.execute("UPDATE flights SET aircraft=? WHERE id=? AND (aircraft IS NULL OR aircraft='')", (r['aircraft'], fid))
         c.execute('UPDATE flights SET label=? WHERE id=?', (r.get('label') if r.get('label', r['number']) != r['number'] else None, fid))
         touched.add(fid)
     closed = 0
@@ -732,7 +737,7 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path
         if path in ('/api/preview', '/api/import'):
             rows = import_preview(p)
-            if path == '/api/preview': return self.send(200, {'rows': rows})
+            if path == '/api/preview': return self.send(200, {'rows': rows, 'skipped': getattr(roster_preview, 'skipped', []) if p.get('kind') == 'roster' else []})
             with LOCK, db() as c: result = import_rows(c, p.get('kind'), rows, bool(p.get('full_list')))
             return self.send(200, result)
         if path == '/api/sccm':
