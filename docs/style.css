@@ -205,3 +205,11 @@ body[data-page=display] #upcoming{padding:14px 22px;margin-bottom:10px}body[data
 body[data-page=display] .intro{margin-bottom:14px}
 @media(orientation:landscape){body[data-page=display]:not(.roomview) .intro p{display:none}}
 .flowcard .destination{min-width:0}.flowcard .flight{line-height:1.05}.flowcard .destination{line-height:1.08}
+
+/* v16: destination landmarks */
+.flowcard>*{position:relative;z-index:1}
+.flowcard .landmark{position:absolute;z-index:0;right:0;bottom:0;width:62%;height:78%;color:#cfe9ff;opacity:.11;pointer-events:none;
+ -webkit-mask-image:linear-gradient(to left,#000 55%,transparent);mask-image:linear-gradient(to left,#000 55%,transparent);transition:opacity 1s}
+.flowcard .landmark svg{width:100%;height:100%;display:block}
+.flowcard.has-lm::after{display:none}
+.flowcard.active:not(.upnext) .landmark{opacity:.14}

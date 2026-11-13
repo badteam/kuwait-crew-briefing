@@ -33,7 +33,8 @@ function cardHtml(f,room,t){
  return '<div class="cardtop"><span class="room" dir="ltr">'+esc(f.room)+'</span><span class="status">'+(before?'Reporting at '+fmt(f.briefing):'Briefing in progress')+'</span></div>'+
   '<div class="flight" dir="ltr">'+esc((f.label||f.number).replace(/^KU/,'KU '))+'</div><div class="destination">'+esc(f.destination||'')+'</div>'+crewHtml(f)+
   '<div class="times"><span>Reporting '+fmt(f.briefing)+' · until '+fmt(f.end)+'</span><span class="countdown" data-brief="'+esc(f.briefing)+'" data-end="'+esc(f.end)+'"></span></div>'+
-  '<div class="progress"><i data-pstart="'+esc(f.start)+'" data-pbrief="'+esc(f.briefing)+'" data-pend="'+esc(f.end)+'"></i></div>'}
+  '<div class="progress"><i data-pstart="'+esc(f.start)+'" data-pbrief="'+esc(f.briefing)+'" data-pend="'+esc(f.end)+'"></i></div>'+
+  (window.landmarkSvg?'<div class="landmark">'+landmarkSvg(f.destination)+'</div>':'')}
 function nextHtml(){const flights=state?.flights||[],next=flights.filter(x=>!x.done&&!x.start&&x.briefing).sort((x,y)=>new Date(x.briefing)-new Date(y.briefing))[0];
  return next?'<p class="nextup">Next briefing <b dir="ltr">'+fmt(next.briefing)+'</b> · <span dir="ltr">'+esc((next.label||next.number).replace(/^KU/,'KU '))+'</span> '+esc(next.destination||'')+'</p>':'<p>Wishing you a pleasant flight</p>'}
 function flow(items,t){
@@ -46,7 +47,7 @@ function flow(items,t){
    Object.assign(el.style,{left:(W+60)+'px',top:r.y+'px',width:r.w+'px',height:r.h+'px'});board.appendChild(el);cards.set(it.id,el);
    el.offsetWidth;requestAnimationFrame(()=>el.classList.remove('entering'))}
   if(el._html!==it.html){el.innerHTML=it.html;el._html=it.html}
-  el.className='card flowcard '+it.cls+(el.classList.contains('entering')?' entering':'');
+  el.className='card flowcard '+it.cls+(it.lm?' has-lm':'')+(el.classList.contains('entering')?' entering':'');
   Object.assign(el.style,{left:r.x+'px',top:r.y+'px',width:r.w+'px',height:r.h+'px'});
   el.style.setProperty('--w',it.w)});
  for(const [id,el] of cards)if(!seen.has(id)){cards.delete(id);el.classList.add('leaving');el.style.left=(-parseFloat(el.style.width)-80)+'px';setTimeout(()=>el.remove(),1100)}
@@ -63,7 +64,7 @@ function render(){
  if(!$('board').classList.contains('flow'))$('board').innerHTML='';
  const t=Date.now()+offset,flights=state?.flights||[];
  const live=flights.filter(f=>!f.done&&f.start&&f.room&&new Date(f.end)>t&&(screen==='hall'||f.room===screen)).sort((a,b)=>new Date(a.briefing)-new Date(b.briefing));
- const items=live.map(f=>({id:f.id,w:screen==='hall'?weightOf(f,t):1,cls:'active'+(new Date(f.briefing)>t?' upnext':''),html:cardHtml(f,f.room,t)}));
+ const items=live.map(f=>({id:f.id,w:screen==='hall'?weightOf(f,t):1,cls:'active'+(new Date(f.briefing)>t?' upnext':''),html:cardHtml(f,f.room,t),lm:true}));
  if(!items.length)items.push({id:'idle-'+screen,w:1,cls:state?'free idlecard':'waiting idlecard',html:cardHtml(null,screen==='hall'?'':screen,t)});
  freeRoomsBar(new Set(live.map(f=>f.room)));
  const queue=flights.filter(f=>!f.done&&!f.start&&f.briefing).sort((a,b)=>new Date(a.briefing)-new Date(b.briefing)),limit=document.body.dataset.orientation==='portrait'||innerHeight>innerWidth?6:3,upcoming=queue.slice(0,limit);
@@ -111,7 +112,7 @@ async function refresh(){
 }
 if(demo){
  // Demo: fictional flights cycling through rooms so the movement can be previewed.
- const names=['Cairo','Dubai','London','Bangkok','Riyadh','Doha','Jeddah','Istanbul','Paris','Manila'];let seq=0,base=Date.now();
+ const names=['Hyderabad','Cairo','Dubai','London','Istanbul','Bangkok','Riyadh','Paris','Kathmandu','Mumbai'];let seq=0,base=Date.now();
  const mk=(min,room)=>{const i=seq++,b=base+min*60000;return {id:'demo-'+i,room,number:'KU '+(101+i*2),destination:names[i%names.length],crew:[{role:i%3?'CCI':'FSS',name:'Demo Crew '+(i+1)}],briefing:new Date(b).toISOString(),start:new Date(b-1800000).toISOString(),end:new Date(b+600000).toISOString(),done:0}};
  state={flights:[mk(-4,'A-1'),mk(6,'B-2'),mk(22,'C-3')],feed:{}};
  setInterval(()=>{const fl=state.flights;if(fl.length>=5||(fl.length>1&&seq%2))fl.shift();else{const used=new Set(fl.map(f=>f.room));fl.push(mk(5+Math.round(Math.random()*20),rooms.find(r=>!used.has(r))))}
