@@ -25,7 +25,7 @@ function rects(items,W,H,portrait){
  for(let r=0;r<rowsN;r++){const c=Math.ceil((n-i)/(rowsN-r));rows.push(items.slice(i,i+c));i+=c}
  const rw=rows.map(row=>Math.max(...row.map(x=>x.w))),sumH=rw.reduce((a,b)=>a+b,0),totalH=H-gap*(rows.length-1),out=[];let y=0;
  rows.forEach((row,ri)=>{const h=totalH*rw[ri]/sumH,sw=row.reduce((a,x)=>a+x.w,0),totalW=W-gap*(row.length-1);let x=0;
-  row.forEach(it=>{const w=totalW*it.w/sw;out.push({id:it.id,x,y,w,h});x+=w+gap});y+=h+gap});
+  row.forEach((it,k)=>{const w=totalW*it.w/sw;out.push({id:it.id,x,y,w,h,first:k===0,last:k===row.length-1&&ri===rows.length-1});x+=w+gap});y+=h+gap});
  return out}
 function cardHtml(f,room,t){
  if(!f)return '<div class="cardtop"><span class="room" dir="ltr">'+esc(room||'')+'</span><span class="status">'+(state?'Available':'Waiting for updates')+'</span></div><div class="idlebox"><div class="idle">'+(state?'Waiting for the next flight':'Waiting for flight schedule')+'</div>'+nextHtml()+'</div>';
@@ -43,14 +43,18 @@ function flow(items,t){
  board.classList.add('flow');board.style.height=H+'px';
  const pos=rects(items,W,H,portrait),seen=new Set();
  pos.forEach((r,i)=>{const it=items[i];seen.add(it.id);let el=cards.get(it.id);
-  if(!el){el=document.createElement('article');el.className='card flowcard entering';el.dataset.id=it.id;
-   Object.assign(el.style,{left:(W+60)+'px',top:r.y+'px',width:r.w+'px',height:r.h+'px'});board.appendChild(el);cards.set(it.id,el);
-   el.offsetWidth;requestAnimationFrame(()=>el.classList.remove('entering'))}
+  if(!el){el=document.createElement('article');el.className='card flowcard entering'+(r.last?'':' grow');el.dataset.id=it.id;
+   // the newest card slides in from the right; one placed between others grows in place
+   Object.assign(el.style,{left:(r.last?W+60:r.x)+'px',top:r.y+'px',width:r.w+'px',height:r.h+'px'});board.appendChild(el);cards.set(it.id,el);
+   el.offsetWidth;requestAnimationFrame(()=>requestAnimationFrame(()=>el.classList.remove('entering','grow')))}
   if(el._html!==it.html){el.innerHTML=it.html;el._html=it.html}
-  el.className='card flowcard '+it.cls+(it.lm?' has-lm':'')+(el.classList.contains('entering')?' entering':'');
+  el.className='card flowcard '+it.cls+(it.lm?' has-lm':'')+(el.classList.contains('entering')?' entering':'')+(el.classList.contains('grow')?' grow':'');el._first=r.first;
   Object.assign(el.style,{left:r.x+'px',top:r.y+'px',width:r.w+'px',height:r.h+'px'});
-  el.style.setProperty('--w',it.w)});
- for(const [id,el] of cards)if(!seen.has(id)){cards.delete(id);el.classList.add('leaving');el.style.left=(-parseFloat(el.style.width)-80)+'px';setTimeout(()=>el.remove(),1100)}
+  el.style.setProperty('--w',it.w);el.style.zIndex=2});
+ for(const [id,el] of cards)if(!seen.has(id)){cards.delete(id);el.style.zIndex=1;
+  // a finished card at the left edge is pushed out of the screen; one in the middle fades away in place
+  if(el._first){el.classList.add('leaving');el.style.left=(-parseFloat(el.style.width)-80)+'px'}else el.classList.add('vanish');
+  setTimeout(()=>el.remove(),1100)}
 }
 function freeRoomsBar(busy){
  let bar=$('freeRooms');if(screen!=='hall'){if(bar)bar.remove();return}

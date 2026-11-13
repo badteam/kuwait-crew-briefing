@@ -213,3 +213,11 @@ body[data-page=display] .intro{margin-bottom:14px}
 .flowcard .landmark svg{width:100%;height:100%;display:block}
 .flowcard.has-lm::after{display:none}
 .flowcard.active:not(.upnext) .landmark{opacity:.17}
+
+/* v18: solid cards so moving cards never show through each other; clipped exits */
+.board.flow{overflow:clip;overflow-clip-margin:40px}
+.flowcard{backdrop-filter:none;background:linear-gradient(150deg,#0f3766,#06203f)!important;transition:left .95s cubic-bezier(.22,.8,.2,1),top .95s cubic-bezier(.22,.8,.2,1),width .95s cubic-bezier(.22,.8,.2,1),height .95s cubic-bezier(.22,.8,.2,1),opacity .6s,transform .6s,box-shadow .6s,border-color .6s}
+.flowcard.active{background:linear-gradient(150deg,#164c88,#07244a)!important}
+.flowcard.active.upnext{background:linear-gradient(150deg,#123f72,#062142)!important}
+.flowcard.grow{transform:scale(.88);opacity:0}
+.flowcard.vanish{transform:scale(.9);opacity:0;transition:opacity .45s,transform .45s}
