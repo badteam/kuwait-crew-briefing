@@ -172,3 +172,36 @@ body.roomview .crewlist .sccm{padding:1.6vh 0}label.check{display:flex;flex-dire
 .sccm.role-ins b{background:linear-gradient(135deg,#7fe0b8,#3fbf8a);color:#04281a}
 .countdown.before{color:var(--gold)}.card.active.upnext .status{background:rgba(233,196,106,.14);color:var(--gold);border-color:rgba(233,196,106,.4)}.card.active.upnext .status::before{background:var(--gold)}
 .previewnote{margin:12px 0;padding:10px 14px;border-radius:12px;background:rgba(94,230,176,.12);color:#c8f5e2;font-weight:600}.previewnote.error{background:rgba(255,120,135,.14);color:#ffd2d7}
+
+/* v15: flow board */
+body[data-page=display]{height:100vh;overflow:hidden}
+.board.flow{display:block;position:relative;margin-bottom:14px}
+.flowcard{position:absolute;margin:0;display:flex;flex-direction:column;container-type:size;transition:left .95s cubic-bezier(.22,.8,.2,1),top .95s cubic-bezier(.22,.8,.2,1),width .95s cubic-bezier(.22,.8,.2,1),height .95s cubic-bezier(.22,.8,.2,1),opacity .7s,box-shadow .6s,border-color .6s;min-height:0!important;overflow:hidden}
+.flowcard.entering{opacity:0}.flowcard.leaving{opacity:0;pointer-events:none;z-index:0}
+.flowcard .cardtop{flex:none}
+.flowcard .room{font-size:clamp(22px,12cqmin,150px)!important}
+.flowcard .status{font-size:clamp(10px,2.6cqmin,22px)!important;padding:.5em 1em!important}
+.flowcard .flight{font-size:clamp(16px,10.5cqmin,120px)!important;margin:auto 0 0!important}
+.flowcard .destination{font-size:clamp(18px,15cqmin,170px)!important;margin:0 0 .25em!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.flowcard .crewlist,.flowcard>.sccm{flex:none}
+.flowcard .sccm{font-size:clamp(12px,6cqmin,60px)!important;padding:.45em 0!important;gap:.6em!important}
+.flowcard .sccm svg{width:1.3em!important;height:1.3em!important}.flowcard .sccm b{font-size:.55em!important;padding:.3em .55em!important}
+.flowcard .sccm span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.flowcard .times{font-size:clamp(11px,3.6cqmin,34px)!important;margin-top:auto!important;flex-wrap:wrap;gap:.2em 1em}
+.flowcard .countdown{font-size:clamp(16px,8cqmin,96px)!important}
+.flowcard .idlebox{margin:auto 0;display:grid;gap:.5em}.flowcard .idle{font-size:clamp(18px,6cqmin,64px)!important;padding:0!important;margin:0!important}
+.flowcard .nextup{font-size:clamp(14px,3.6cqmin,40px)!important;text-align:left!important}
+.flowcard.idlecard{opacity:1}.flowcard.idlecard::after{width:45%;height:55%}
+.progress{flex:none;height:clamp(4px,1.1cqmin,10px);margin-top:.6em;border-radius:99px;background:rgba(157,220,255,.14);overflow:hidden}
+.progress i{display:block;height:100%;width:0;border-radius:inherit;background:linear-gradient(90deg,var(--sky),var(--ok));transition:width 1s linear}.progress i.pre{background:linear-gradient(90deg,#b8902e,var(--gold))}
+.flowcard.active:not(.upnext){animation:glow 3.2s ease-in-out infinite}
+@keyframes glow{50%{box-shadow:0 0 0 1px rgba(94,230,176,.35),0 0 46px rgba(92,196,255,.28),0 22px 50px rgba(0,40,90,.45)}}
+#freeRooms{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:0 0 14px}
+#freeRooms .label{font:700 11px var(--ui);letter-spacing:.2em;text-transform:uppercase;color:var(--muted);margin-right:6px}
+#freeRooms .chip{font:700 18px var(--num);letter-spacing:.06em;padding:6px 14px;border-radius:30px;border:1px solid rgba(157,220,255,.25);background:rgba(10,38,74,.55);color:var(--sky-2)}
+body.roomview .flowcard{padding:3vh 4vw}
+body.roomview #upcoming{display:none}
+body[data-page=display] #upcoming{padding:14px 22px;margin-bottom:10px}body[data-page=display] #upcoming h2{margin-bottom:6px}
+body[data-page=display] .intro{margin-bottom:14px}
+@media(orientation:landscape){body[data-page=display]:not(.roomview) .intro p{display:none}}
+.flowcard .destination{min-width:0}.flowcard .flight{line-height:1.05}.flowcard .destination{line-height:1.08}

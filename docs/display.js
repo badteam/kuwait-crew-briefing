@@ -16,21 +16,61 @@ function layout(){
  document.body.classList.toggle('roomview',screen!=='hall');$('upcoming').hidden=screen!=='hall';
  $('title').textContent=screen==='hall'?'Your journey starts here':'Briefing room '+screen;
 }
+// ---- Flow board: cards sized by priority, pushed in and out with animation ----
+const cards=new Map();let lastLayoutKey='';
+function weightOf(f,t){const b=new Date(f.briefing);if(b<=t)return 3;return (b-t)<=600000?2:1}
+function rects(items,W,H,portrait){
+ const n=items.length,gap=Math.round(Math.min(W,H)*0.02)+8;if(!n)return [];
+ const rowsN=portrait?(n<=2?n:Math.ceil(n/2)):(n<=3?1:n<=8?2:3),rows=[];let i=0;
+ for(let r=0;r<rowsN;r++){const c=Math.ceil((n-i)/(rowsN-r));rows.push(items.slice(i,i+c));i+=c}
+ const rw=rows.map(row=>Math.max(...row.map(x=>x.w))),sumH=rw.reduce((a,b)=>a+b,0),totalH=H-gap*(rows.length-1),out=[];let y=0;
+ rows.forEach((row,ri)=>{const h=totalH*rw[ri]/sumH,sw=row.reduce((a,x)=>a+x.w,0),totalW=W-gap*(row.length-1);let x=0;
+  row.forEach(it=>{const w=totalW*it.w/sw;out.push({id:it.id,x,y,w,h});x+=w+gap});y+=h+gap});
+ return out}
+function cardHtml(f,room,t){
+ if(!f)return '<div class="cardtop"><span class="room" dir="ltr">'+esc(room||'')+'</span><span class="status">'+(state?'Available':'Waiting for updates')+'</span></div><div class="idlebox"><div class="idle">'+(state?'Waiting for the next flight':'Waiting for flight schedule')+'</div>'+nextHtml()+'</div>';
+ const before=new Date(f.briefing)>t;
+ return '<div class="cardtop"><span class="room" dir="ltr">'+esc(f.room)+'</span><span class="status">'+(before?'Reporting at '+fmt(f.briefing):'Briefing in progress')+'</span></div>'+
+  '<div class="flight" dir="ltr">'+esc((f.label||f.number).replace(/^KU/,'KU '))+'</div><div class="destination">'+esc(f.destination||'')+'</div>'+crewHtml(f)+
+  '<div class="times"><span>Reporting '+fmt(f.briefing)+' · until '+fmt(f.end)+'</span><span class="countdown" data-brief="'+esc(f.briefing)+'" data-end="'+esc(f.end)+'"></span></div>'+
+  '<div class="progress"><i data-pstart="'+esc(f.start)+'" data-pbrief="'+esc(f.briefing)+'" data-pend="'+esc(f.end)+'"></i></div>'}
+function nextHtml(){const flights=state?.flights||[],next=flights.filter(x=>!x.done&&!x.start&&x.briefing).sort((x,y)=>new Date(x.briefing)-new Date(y.briefing))[0];
+ return next?'<p class="nextup">Next briefing <b dir="ltr">'+fmt(next.briefing)+'</b> · <span dir="ltr">'+esc((next.label||next.number).replace(/^KU/,'KU '))+'</span> '+esc(next.destination||'')+'</p>':'<p>Wishing you a pleasant flight</p>'}
+function flow(items,t){
+ const board=$('board'),top=board.getBoundingClientRect().top,below=(screen==='hall'?$('upcoming').offsetHeight+24:0)+($('freeRooms')?.offsetHeight||0)+document.querySelector('footer').offsetHeight+64;
+ const H=Math.max(260,innerHeight-top-below),W=board.clientWidth,portrait=document.body.dataset.orientation==='portrait'||(document.body.dataset.orientation!=='landscape'&&innerHeight>innerWidth);
+ board.classList.add('flow');board.style.height=H+'px';
+ const pos=rects(items,W,H,portrait),seen=new Set();
+ pos.forEach((r,i)=>{const it=items[i];seen.add(it.id);let el=cards.get(it.id);
+  if(!el){el=document.createElement('article');el.className='card flowcard entering';el.dataset.id=it.id;
+   Object.assign(el.style,{left:(W+60)+'px',top:r.y+'px',width:r.w+'px',height:r.h+'px'});board.appendChild(el);cards.set(it.id,el);
+   el.offsetWidth;requestAnimationFrame(()=>el.classList.remove('entering'))}
+  if(el._html!==it.html){el.innerHTML=it.html;el._html=it.html}
+  el.className='card flowcard '+it.cls+(el.classList.contains('entering')?' entering':'');
+  Object.assign(el.style,{left:r.x+'px',top:r.y+'px',width:r.w+'px',height:r.h+'px'});
+  el.style.setProperty('--w',it.w)});
+ for(const [id,el] of cards)if(!seen.has(id)){cards.delete(id);el.classList.add('leaving');el.style.left=(-parseFloat(el.style.width)-80)+'px';setTimeout(()=>el.remove(),1100)}
+}
+function freeRoomsBar(busy){
+ let bar=$('freeRooms');if(screen!=='hall'){if(bar)bar.remove();return}
+ if(!bar){bar=document.createElement('div');bar.id='freeRooms';$('board').after(bar)}
+ const free=rooms.filter(r=>!busy.has(r));
+ bar.innerHTML=free.length?'<span class="label">Available rooms</span>'+free.map(r=>'<span class="chip" dir="ltr">'+r+'</span>').join(''):'<span class="label">All rooms in use</span>';
+}
 function render(){
  layout();
- if(pairing){$('board').innerHTML='<article class="card pairing"><div class="cardtop"><span class="status">Display setup</span></div><p>Enter this code in the administration panel to assign this screen to a room.</p><div class="paircode" dir="ltr">'+esc(pairing.code.slice(0,3)+' '+pairing.code.slice(3))+'</div><p>The code renews automatically.</p></article>';$('queue').innerHTML='';$('upcoming').hidden=true;clock();return}
+ if(pairing){cards.clear();$('board').classList.remove('flow');$('board').style.height='';$('board').innerHTML='<article class="card pairing"><div class="cardtop"><span class="status">Display setup</span></div><p>Enter this code in the administration panel to assign this screen to a room.</p><div class="paircode" dir="ltr">'+esc(pairing.code.slice(0,3)+' '+pairing.code.slice(3))+'</div><p>The code renews automatically.</p></article>';$('queue').innerHTML='';$('upcoming').hidden=true;$('freeRooms')?.remove();clock();return}
+ if(!$('board').classList.contains('flow'))$('board').innerHTML='';
  const t=Date.now()+offset,flights=state?.flights||[];
- $('board').innerHTML=(screen==='hall'?rooms:[screen]).map(room=>{
-  const f=flights.find(f=>f.room===room&&!f.done&&f.start&&new Date(f.end)>t);
-  const next=flights.filter(x=>!x.done&&!x.start&&x.briefing).sort((x,y)=>x.briefing<y.briefing?-1:1)[0];
-  let content='<div class="idle">'+(state?'Waiting for the next flight':'Waiting for flight schedule')+'</div>'+(next?'<p class="nextup">Next briefing <b dir="ltr">'+fmt(next.briefing)+'</b> · <span dir="ltr">'+esc(next.number.replace(/^KU/,'KU '))+'</span> '+esc(next.destination)+'</p>':'<p>Wishing you a pleasant flight</p>');
-  if(f)content='<div class="flight" dir="ltr">'+esc((f.label||f.number).replace(/^KU/,'KU '))+'</div><div class="destination">'+esc(f.destination)+'</div>'+crewHtml(f)+'<div class="times"><span>Reporting '+fmt(f.briefing)+' · until '+fmt(f.end)+'</span><span class="countdown" data-brief="'+esc(f.briefing)+'" data-end="'+esc(f.end)+'"></span></div>';
-  return '<article class="card '+(f?'active':state?'free':'waiting')+'"><div class="cardtop"><span class="room" dir="ltr">'+room+'</span><span class="status">'+(f?(new Date(f.briefing)>t?'Reporting at '+fmt(f.briefing):'Briefing in progress'):state?'Available':'Waiting for updates')+'</span></div>'+content+'</article>';
- }).join('');
- const queue=flights.filter(f=>!f.done&&!f.start&&f.briefing).sort((a,b)=>new Date(a.briefing)-new Date(b.briefing)),limit=document.body.dataset.orientation==='portrait'||innerHeight>innerWidth?8:5,upcoming=queue.slice(0,limit);
- $('queue').innerHTML=upcoming.length?'<div class="qrow"><span>Flight</span><span>Destination</span><span>Briefing</span><span>Status</span></div>'+upcoming.map(f=>'<div class="qrow"><span dir="ltr">'+esc((f.label||f.number).replace(/^KU/,'KU '))+'</span><span>'+esc(f.destination)+'</span><span dir="ltr">'+df(f.briefing)+' '+fmt(f.briefing)+'</span><span>'+(new Date(f.briefing)-1800000<=t?'Waiting for a room':'Upcoming')+'</span></div>').join(''):'<p>'+(state?'No flights in the queue':'Waiting for flight schedule updates')+'</p>';
- clock();
+ const live=flights.filter(f=>!f.done&&f.start&&f.room&&new Date(f.end)>t&&(screen==='hall'||f.room===screen)).sort((a,b)=>new Date(a.briefing)-new Date(b.briefing));
+ const items=live.map(f=>({id:f.id,w:screen==='hall'?weightOf(f,t):1,cls:'active'+(new Date(f.briefing)>t?' upnext':''),html:cardHtml(f,f.room,t)}));
+ if(!items.length)items.push({id:'idle-'+screen,w:1,cls:state?'free idlecard':'waiting idlecard',html:cardHtml(null,screen==='hall'?'':screen,t)});
+ freeRoomsBar(new Set(live.map(f=>f.room)));
+ const queue=flights.filter(f=>!f.done&&!f.start&&f.briefing).sort((a,b)=>new Date(a.briefing)-new Date(b.briefing)),limit=document.body.dataset.orientation==='portrait'||innerHeight>innerWidth?6:3,upcoming=queue.slice(0,limit);
+ $('queue').innerHTML=upcoming.length?'<div class="qrow"><span>Flight</span><span>Destination</span><span>Briefing</span><span>Status</span></div>'+upcoming.map(f=>'<div class="qrow"><span dir="ltr">'+esc((f.label||f.number).replace(/^KU/,'KU '))+'</span><span>'+esc(f.destination||'')+'</span><span dir="ltr">'+df(f.briefing)+' '+fmt(f.briefing)+'</span><span>'+(new Date(f.briefing)-1800000<=t?'Waiting for a room':'Upcoming')+'</span></div>').join(''):'<p>'+(state?'No flights in the queue':'Waiting for flight schedule updates')+'</p>';
+ flow(items,t);clock();
 }
+addEventListener('resize',()=>render());
 function feedNotice(){
  const feed=state?.feed||{},last=feed.last_success;
  $('updated').textContent=last?'Flight schedule updated '+df(last)+' '+fmt(last):'Flight schedule not yet received';
@@ -40,6 +80,7 @@ function feedNotice(){
 function clock(){
  $('clock').textContent=fmt(Date.now()+offset);
  document.querySelectorAll('[data-end]').forEach(el=>{const now=Date.now()+offset,b=el.dataset.brief?new Date(el.dataset.brief):0,before=b&&b>now,n=Math.max(0,Math.ceil(((before?b:new Date(el.dataset.end))-now)/1000)),txt=(before?'Starts in ':'Remaining ')+Math.floor(n/60)+':'+String(n%60).padStart(2,'0');el.textContent=txt;el.classList.toggle('before',!!before);const card=el.closest('.card');if(card){card.classList.toggle('upnext',!!before);const st=card.querySelector('.status');if(st&&card.classList.contains('active'))st.textContent=before?'Reporting at '+fmt(b):'Briefing in progress'}});
+ document.querySelectorAll('[data-pend]').forEach(el=>{const now=Date.now()+offset,b=+new Date(el.dataset.pbrief),e=+new Date(el.dataset.pend),st=+new Date(el.dataset.pstart);const p=now<b?(now-st)/Math.max(1,b-st):(now-b)/Math.max(1,e-b);el.style.width=Math.max(0,Math.min(100,p*100))+'%';el.classList.toggle('pre',now<b)});
  if(!demo&&!pairing&&lastFetch&&Date.now()-lastFetch>20000){document.body.classList.add('stale');$('notice').textContent='Updates interrupted — please check with the flight dispatcher.'}
 }
 async function post(path,body){const r=await fetch(API+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(12000)});return [r.status,await r.json().catch(()=>({}))]}
@@ -69,8 +110,12 @@ async function refresh(){
  finally{busy=false}
 }
 if(demo){
- const t=Date.now();
- state={flights:[...rooms.map((r,i)=>({id:'demo-'+i,room:r,number:'DEMO '+(101+i),destination:['Cairo','Dubai','London','Bangkok','Riyadh','Doha','Jeddah'][i],sccm:'Demo crew '+(i+1),start:new Date(t-60000).toISOString(),end:new Date(t+540000).toISOString(),done:0})),{number:'DEMO 108',destination:'Demo flight',briefing:new Date(t+600000).toISOString(),done:0}]};
+ // Demo: fictional flights cycling through rooms so the movement can be previewed.
+ const names=['Cairo','Dubai','London','Bangkok','Riyadh','Doha','Jeddah','Istanbul','Paris','Manila'];let seq=0,base=Date.now();
+ const mk=(min,room)=>{const i=seq++,b=base+min*60000;return {id:'demo-'+i,room,number:'KU '+(101+i*2),destination:names[i%names.length],crew:[{role:i%3?'CCI':'FSS',name:'Demo Crew '+(i+1)}],briefing:new Date(b).toISOString(),start:new Date(b-1800000).toISOString(),end:new Date(b+600000).toISOString(),done:0}};
+ state={flights:[mk(-4,'A-1'),mk(6,'B-2'),mk(22,'C-3')],feed:{}};
+ setInterval(()=>{const fl=state.flights;if(fl.length>=5||(fl.length>1&&seq%2))fl.shift();else{const used=new Set(fl.map(f=>f.room));fl.push(mk(5+Math.round(Math.random()*20),rooms.find(r=>!used.has(r))))}
+  base=Date.now();fl.forEach((f,k)=>{const b=Date.now()+(k===0?-3:k*7)*60000;f.briefing=new Date(b).toISOString();f.start=new Date(b-1800000).toISOString();f.end=new Date(b+600000).toISOString()})},6000);
  $('notice').textContent='Demo preview — not operational data';$('updated').textContent='Demo data';
 }
 render();refresh();setInterval(clock,1000);setInterval(()=>{if(demo)render();else refresh()},5000);
