@@ -208,8 +208,8 @@ body[data-page=display] .intro{margin-bottom:14px}
 
 /* v16: destination landmarks */
 .flowcard>*{position:relative;z-index:1}
-.flowcard .landmark{position:absolute;z-index:0;right:0;bottom:0;width:62%;height:78%;color:#cfe9ff;opacity:.11;pointer-events:none;
- -webkit-mask-image:linear-gradient(to left,#000 55%,transparent);mask-image:linear-gradient(to left,#000 55%,transparent);transition:opacity 1s}
+.flowcard .landmark{position:absolute;z-index:0;right:0;bottom:0;width:80%;height:92%;color:#cfe9ff;opacity:.13;pointer-events:none;
+ -webkit-mask-image:linear-gradient(to left,#000 62%,transparent);mask-image:linear-gradient(to left,#000 62%,transparent);transition:opacity 1s}
 .flowcard .landmark svg{width:100%;height:100%;display:block}
 .flowcard.has-lm::after{display:none}
-.flowcard.active:not(.upnext) .landmark{opacity:.14}
+.flowcard.active:not(.upnext) .landmark{opacity:.17}
