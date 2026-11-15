@@ -14,7 +14,7 @@ const crewHtml=f=>{const l=f.crew&&f.crew.length?f.crew:[];return l.length?'<div
 function layout(){
  document.body.dataset.orientation=['auto','portrait','landscape'].includes(orientation)?orientation:'auto';
  document.body.classList.toggle('roomview',screen!=='hall');$('upcoming').hidden=screen!=='hall';
- $('title').textContent=screen==='hall'?'Your journey starts here':'Briefing room '+screen;
+ $('title').textContent=screen==='hall'?'Cabin crew briefing rooms':'Briefing room '+screen;
 }
 // ---- Flow board: cards sized by priority, pushed in and out with animation ----
 const cards=new Map();let lastLayoutKey='';
@@ -28,9 +28,9 @@ function rects(items,W,H,portrait){
   row.forEach((it,k)=>{const w=totalW*it.w/sw;out.push({id:it.id,x,y,w,h,first:k===0,last:k===row.length-1&&ri===rows.length-1});x+=w+gap});y+=h+gap});
  return out}
 function cardHtml(f,room,t){
- if(!f)return '<div class="cardtop"><span class="room" dir="ltr">'+esc(room||'')+'</span><span class="status">'+(state?'Available':'Waiting for updates')+'</span></div><div class="idlebox"><div class="idle">'+(state?'Waiting for the next flight':'Waiting for flight schedule')+'</div>'+nextHtml()+'</div>';
+ if(!f)return '<div class="cardtop">'+(room?'<span class="roomtag"><small>Briefing room</small><span class="room" dir="ltr">'+esc(room)+'</span></span>':'<span></span>')+'<span class="status">'+(state?'Available':'Waiting for updates')+'</span></div><div class="idlebox"><div class="idle">'+(state?'Waiting for the next flight':'Waiting for flight schedule')+'</div>'+nextHtml()+'</div>';
  const before=new Date(f.briefing)>t;
- return '<div class="cardtop"><span class="room" dir="ltr">'+esc(f.room)+'</span><span class="status">'+(before?'Reporting at '+fmt(f.briefing):'Briefing in progress')+'</span></div>'+
+ return '<div class="cardtop"><span class="roomtag"><small>Briefing room</small><span class="room" dir="ltr">'+esc(f.room)+'</span></span><span class="status">'+(before?'Reporting at '+fmt(f.briefing):'Briefing in progress')+'</span></div>'+
   '<div class="flight" dir="ltr">'+esc((f.label||f.number).replace(/^KU/,'KU '))+'</div><div class="destination">'+esc(f.destination||'')+'</div>'+crewHtml(f)+
   '<div class="times"><span>Reporting '+fmt(f.briefing)+' · until '+fmt(f.end)+'</span><span class="countdown" data-brief="'+esc(f.briefing)+'" data-end="'+esc(f.end)+'"></span></div>'+
   '<div class="progress"><i data-pstart="'+esc(f.start)+'" data-pbrief="'+esc(f.briefing)+'" data-pend="'+esc(f.end)+'"></i></div>'+

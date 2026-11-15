@@ -221,3 +221,12 @@ body[data-page=display] .intro{margin-bottom:14px}
 .flowcard.active.upnext{background:linear-gradient(150deg,#123f72,#062142)!important}
 .flowcard.grow{transform:scale(.88);opacity:0}
 .flowcard.vanish{transform:scale(.9);opacity:0;transition:opacity .45s,transform .45s}
+
+/* v19: clear room label */
+.roomtag{display:inline-flex;flex-direction:column;align-items:flex-start;gap:.15em;padding:.35em .7em .45em;border-radius:.45em;background:linear-gradient(135deg,rgba(233,196,106,.22),rgba(233,196,106,.08));border:1px solid rgba(233,196,106,.55);line-height:1}
+.roomtag small{font:800 clamp(9px,2.4cqmin,22px)/1 var(--ui);letter-spacing:.22em;text-transform:uppercase;color:#ffe2a0}
+.roomtag .room{color:var(--gold)!important;text-shadow:0 0 24px rgba(233,196,106,.35)}
+.flowcard .roomtag .room{font-size:clamp(30px,17cqmin,200px)!important}
+body.roomview .flowcard .roomtag .room{font-size:clamp(60px,20cqmin,260px)!important}
+.flowcard .cardtop{align-items:flex-start}
+.roomtag .room,.roomtag small{white-space:nowrap}.flowcard .cardtop{flex-wrap:wrap;gap:.4em}
