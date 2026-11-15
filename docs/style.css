@@ -230,3 +230,8 @@ body[data-page=display] .intro{margin-bottom:14px}
 body.roomview .flowcard .roomtag .room{font-size:clamp(60px,20cqmin,260px)!important}
 .flowcard .cardtop{align-items:flex-start}
 .roomtag .room,.roomtag small{white-space:nowrap}.flowcard .cardtop{flex-wrap:wrap;gap:.4em}
+
+/* v20: centred, larger screen title */
+body[data-page=display] .intro{justify-content:center;text-align:center;flex-direction:column;align-items:center}
+body[data-page=display] .intro .welcome,body[data-page=display] .intro p,body[data-page=display] .intro .eyebrow{display:none}
+body[data-page=display] #title{font-size:clamp(40px,5.4vw,96px);letter-spacing:.08em;text-transform:uppercase;margin:0;line-height:1.05}

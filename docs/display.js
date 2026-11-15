@@ -14,7 +14,7 @@ const crewHtml=f=>{const l=f.crew&&f.crew.length?f.crew:[];return l.length?'<div
 function layout(){
  document.body.dataset.orientation=['auto','portrait','landscape'].includes(orientation)?orientation:'auto';
  document.body.classList.toggle('roomview',screen!=='hall');$('upcoming').hidden=screen!=='hall';
- $('title').textContent=screen==='hall'?'Cabin crew briefing rooms':'Briefing room '+screen;
+ $('title').textContent=screen==='hall'?'Briefing Room':'Briefing Room '+screen;
 }
 // ---- Flow board: cards sized by priority, pushed in and out with animation ----
 const cards=new Map();let lastLayoutKey='';
